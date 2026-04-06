@@ -1,0 +1,54 @@
+{
+  "name": "@x1scroll/agent-sdk",
+  "version": "1.0.0",
+  "description": "Agent identity and on-chain memory protocol for X1 blockchain",
+  "license": "BSL-1.1",
+  "main": "src/index.js",
+  "types": "src/index.d.ts",
+  "files": [
+    "src/",
+    "examples/",
+    "README.md",
+    "LICENSE"
+  ],
+  "keywords": [
+    "x1",
+    "x1scroll",
+    "solana",
+    "svm",
+    "agent",
+    "ai-agent",
+    "memory",
+    "on-chain",
+    "identity",
+    "blockchain",
+    "ipfs",
+    "llm"
+  ],
+  "author": "x1scroll.io (Arnett Esters)",
+  "homepage": "https://x1scroll.io",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/x1scroll/agent-identity-sdk.git"
+  },
+  "bugs": {
+    "url": "https://github.com/x1scroll/agent-identity-sdk/issues"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  },
+  "dependencies": {
+    "@solana/web3.js": "^1.98.0",
+    "bs58": "^5.0.0"
+  },
+  "devDependencies": {
+    "jest": "^29.0.0"
+  },
+  "scripts": {
+    "test": "jest",
+    "lint": "node --check src/index.js"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

@@ -27,6 +27,14 @@ const bs58 = require('bs58');
 const bs58encode = (typeof bs58.encode === 'function') ? bs58.encode : bs58.default.encode;
 const bs58decode = (typeof bs58.decode === 'function') ? bs58.decode : bs58.default.decode;
 
+// ── Registry cache TTL ────────────────────────────────────────────────────────
+const REGISTRY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in ms
+
+// ── Fallback validators — used when registry is empty or unreachable ───────────
+const FALLBACK_VALIDATORS = [
+  { endpoint: 'https://x1scroll.io/api/ipfs/upload', active: true, fallback: true },
+];
+
 // ── Protocol constants — hardcoded, do not change ─────────────────────────────
 /**
  * On-chain program address. Immutable — this SDK only talks to this program.
@@ -312,8 +320,10 @@ class AgentClient {
       );
     }
 
-    this.rpcUrl      = rpcUrl;
-    this._connection = null; // lazy
+    this.rpcUrl            = rpcUrl;
+    this._connection       = null; // lazy
+    this._registryCache    = null;
+    this._registryCacheExpiry = 0;
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -349,6 +359,63 @@ class AgentClient {
     );
 
     return sig;
+  }
+
+  /**
+   * Get active validators from on-chain registry (simulated — falls back to hardcoded list).
+   * Results are cached for REGISTRY_CACHE_TTL (5 minutes).
+   * @returns {Promise<Array<{endpoint: string, active: boolean, fallback?: boolean}>>}
+   */
+  async _getActiveValidators() {
+    const now = Date.now();
+    if (this._registryCache && now < this._registryCacheExpiry) {
+      return this._registryCache;
+    }
+    // For now: return fallback (registry program not deployed yet)
+    // When program is live, this queries on-chain StorageNode accounts
+    this._registryCache = FALLBACK_VALIDATORS;
+    this._registryCacheExpiry = now + REGISTRY_CACHE_TTL;
+    return this._registryCache;
+  }
+
+  /**
+   * Verify that a pinned CID is reachable on the public IPFS gateway.
+   * Non-fatal — returns false on failure (content may still propagate).
+   * @param {string} cid
+   * @returns {Promise<boolean>}
+   */
+  async _verifyPin(cid) {
+    try {
+      const res = await fetch(`https://ipfs.io/ipfs/${cid}`, {
+        method: 'HEAD',
+        signal: AbortSignal.timeout(8000),
+      });
+      return res.ok;
+    } catch {
+      return false; // non-fatal — log warning but don't throw
+    }
+  }
+
+  /**
+   * Pin content to a single validator endpoint.
+   * @param {string} endpoint
+   * @param {string} body          Serialized content
+   * @param {string} topic
+   * @param {string} agentPubkey
+   * @returns {Promise<string|null>}  CID string on success, null on failure
+   */
+  async _pinToEndpoint(endpoint, body, topic, agentPubkey) {
+    const res = await fetch(endpoint, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify({ content: body, topic, agentPubkey }),
+    });
+    if (!res.ok) {
+      const err = await res.text();
+      throw new AgentSDKError(`Validator pin failed at ${endpoint} (${res.status}): ${err}`, 'PIN_ENDPOINT_ERROR');
+    }
+    const json = await res.json();
+    return json.cid || null;
   }
 
   // ── Static PDA Helpers ──────────────────────────────────────────────────────
@@ -563,22 +630,23 @@ class AgentClient {
     let cid;
 
     if (provider === 'x1scroll' || !provider) {
-      // Upload to x1scroll validator network — pinned across X1 infrastructure
-      const res = await fetch('https://x1scroll.io/api/ipfs/upload', {
-        method:  'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body:    JSON.stringify({
-          content:    body,
-          topic,
-          agentPubkey: agentKeypair.publicKey.toBase58(),
-        }),
-      });
-      if (!res.ok) {
-        const err = await res.text();
-        throw new AgentSDKError(`x1scroll IPFS upload failed (${res.status}): ${err}`, 'X1SCROLL_IPFS_ERROR');
+      // Multi-pin to up to 5 active validators simultaneously for resilience
+      const validators = await this._getActiveValidators();
+      const selected = validators
+        .slice()
+        .sort(() => Math.random() - 0.5)
+        .slice(0, Math.min(5, validators.length));
+
+      const agentPubkeyStr = agentKeypair.publicKey.toBase58();
+      const results = await Promise.allSettled(
+        selected.map(v => this._pinToEndpoint(v.endpoint, body, topic, agentPubkeyStr))
+      );
+
+      const success = results.find(r => r.status === 'fulfilled' && r.value);
+      if (!success) {
+        throw new AgentSDKError('All validator pins failed', 'PIN_FAILED');
       }
-      const json = await res.json();
-      cid = json.cid;
+      cid = success.value;
 
     } else if (provider === 'pinata') {
       if (!pinataJwt) {
@@ -613,10 +681,16 @@ class AgentClient {
       throw new AgentSDKError('IPFS upload returned no CID', 'NO_CID');
     }
 
+    // Verify pin is reachable on public IPFS gateway (non-fatal)
+    const verified = await this._verifyPin(cid);
+    if (!verified) {
+      console.warn(`[x1scroll] Warning: CID ${cid} could not be verified on public IPFS gateway. Content may take time to propagate.`);
+    }
+
     // Store CID on-chain
     const result = await this.storeMemory(agentKeypair, agentRecordHuman, topic, cid, tags, encrypted);
 
-    return { ...result, cid };
+    return { ...result, cid, verified };
   }
 
   /**

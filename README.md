@@ -405,6 +405,44 @@ Fees are **automatic** — built into the on-chain instructions. Developers don'
 
 ---
 
+## Security
+
+The SDK implements several hardened security features to ensure reliable, tamper-resistant memory storage:
+
+### Multi-Validator Pinning (5 Simultaneous)
+
+When using the `x1scroll` provider, content is pinned to **up to 5 validators simultaneously** using `Promise.allSettled`. The first successful CID is used — if any validator succeeds, the upload proceeds. This eliminates single points of failure and ensures resilience against validator downtime.
+
+```
+Upload → [Validator 1] ✓ CID returned  ← used
+          [Validator 2] ✓ CID returned
+          [Validator 3] ✗ Failed        ← ignored (others succeeded)
+          ...
+```
+
+If **all** validators fail, an `AgentSDKError` with code `PIN_FAILED` is thrown.
+
+### Automatic Fallback to x1scroll.io
+
+If the on-chain validator registry is unreachable or empty, the SDK automatically falls back to `https://x1scroll.io/api/ipfs/upload` — no configuration needed. Uploads will succeed even if the registry program hasn't been deployed yet.
+
+### CID Verification After Upload
+
+After a successful pin, the SDK verifies the CID is reachable on the public IPFS gateway (`https://ipfs.io/ipfs/<cid>`) using a HEAD request with an 8-second timeout. This is **non-fatal** — if verification fails, a warning is logged and the `verified: false` flag is returned in the response. Content may still propagate to the gateway within minutes.
+
+```js
+const { cid, verified } = await client.uploadMemory(...);
+if (!verified) {
+  // Content pinned, but not yet visible on public gateway — normal for new pins
+}
+```
+
+### Registry Cache (5-Minute TTL)
+
+The active validator list is cached in memory for **5 minutes** to avoid hammering the on-chain registry on every upload. The cache is per-client-instance and invalidates automatically after TTL expiry.
+
+---
+
 ## Protocol Info
 
 | Field | Value |

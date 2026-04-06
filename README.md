@@ -313,6 +313,44 @@ Your agent gets smarter. Every session.
 
 ---
 
+## ⚠️ IPFS Pinning — Read This First
+
+`storeMemory()` stores a **pointer** (CID) on-chain — not the content itself. The on-chain record is permanent. The content is only as permanent as your IPFS pin.
+
+**If you don't pin the CID, your content can disappear. The on-chain record will still exist, but it will point to nothing.**
+
+### Pin your CIDs (pick one):
+
+**Pinata (easiest):**
+```js
+const pinata = new PinataSDK({ pinataJwt: process.env.PINATA_JWT });
+const { IpfsHash } = await pinata.upload.json(memoryObject);
+// IpfsHash is your CID — it's already pinned
+await client.storeMemory(agentKeypair, human, topic, IpfsHash, tags);
+```
+
+**Filebase (S3-compatible, cheap):**
+```js
+// Upload to Filebase bucket → get CID → pin is automatic
+```
+
+**Self-hosted (advanced):**
+```bash
+ipfs pin add <CID>
+```
+
+**What the chain gives you:**
+- Immutable, ordered index of memory events
+- Ownership + transferability
+- XNT-gated writes (spam resistance)
+- No single point of failure for the *record*
+
+**What you must provide:**
+- IPFS content pinning (Pinata, Filebase, or your own node)
+- x1scroll.io indexes pinned memories for semantic search — use our RPC for full retrieval stack
+
+---
+
 ## Fee Structure
 
 | Action | XNT Cost | Why |

@@ -122,29 +122,22 @@ const { txSig, memoryEntryPDA } = await client.storeMemory(
 
 **Fee:** 0.001 XNT (same as `storeMemory`)
 
-```js
-// Using x1scroll.io IPFS (free, rate-limited — good for dev/testing)
-const { txSig, cid } = await client.uploadMemory(
-  agentKeypair,
-  humanWallet.publicKey.toBase58(),
-  'session-2026-04-06',
-  { summary: 'Discussed SDK launch', decisions: ['publish to npm', 'BSL license'] }
-);
+Requires a free [Pinata](https://pinata.cloud) API key (free tier: 100 pins, 1GB — enough for development and testing).
 
-// Using Pinata (production — persistent pinning guaranteed)
+```js
 const { txSig, cid } = await client.uploadMemory(
   agentKeypair,
   humanWallet.publicKey.toBase58(),
   'session-2026-04-06',
-  { summary: 'Discussed SDK launch' },
-  { provider: 'pinata', pinataJwt: process.env.PINATA_JWT, tags: ['session', 'daily'] }
+  { summary: 'Discussed SDK launch', decisions: ['publish to npm', 'BSL license'] },
+  { pinataJwt: process.env.PINATA_JWT, tags: ['session', 'daily'] }
 );
+// Content is pinned on IPFS, CID stored on X1. Done.
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `provider` | `string` | `'x1scroll'` | `'pinata'` or `'x1scroll'` |
-| `pinataJwt` | `string` | — | Required if provider is `'pinata'` |
+| `pinataJwt` | `string` | — | **Required.** Get free at pinata.cloud |
 | `tags` | `string[]` | `[]` | Up to 5 tags |
 | `encrypted` | `boolean` | `false` | Whether content is encrypted |
 

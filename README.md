@@ -116,6 +116,44 @@ const { txSig, memoryEntryPDA } = await client.storeMemory(
 
 ---
 
+### `client.uploadMemory(agentKeypair, agentRecordHuman, topic, content, options?)`
+
+**The easy path** — handles IPFS upload, pinning, and on-chain storage in one call. No IPFS knowledge required.
+
+**Fee:** 0.001 XNT (same as `storeMemory`)
+
+```js
+// Using x1scroll.io IPFS (free, rate-limited — good for dev/testing)
+const { txSig, cid } = await client.uploadMemory(
+  agentKeypair,
+  humanWallet.publicKey.toBase58(),
+  'session-2026-04-06',
+  { summary: 'Discussed SDK launch', decisions: ['publish to npm', 'BSL license'] }
+);
+
+// Using Pinata (production — persistent pinning guaranteed)
+const { txSig, cid } = await client.uploadMemory(
+  agentKeypair,
+  humanWallet.publicKey.toBase58(),
+  'session-2026-04-06',
+  { summary: 'Discussed SDK launch' },
+  { provider: 'pinata', pinataJwt: process.env.PINATA_JWT, tags: ['session', 'daily'] }
+);
+```
+
+| Option | Type | Default | Description |
+|--------|------|---------|-------------|
+| `provider` | `string` | `'x1scroll'` | `'pinata'` or `'x1scroll'` |
+| `pinataJwt` | `string` | — | Required if provider is `'pinata'` |
+| `tags` | `string[]` | `[]` | Up to 5 tags |
+| `encrypted` | `boolean` | `false` | Whether content is encrypted |
+
+**Returns:** `Promise<{ txSig: string, memoryEntryPDA: string, cid: string }>`
+
+> **Use `uploadMemory()` if you want zero IPFS configuration.** Use `storeMemory()` directly if you manage your own pinning infrastructure.
+
+---
+
 ### `client.updateAgent(humanKeypair, agentPubkey, name, metadataUri)`
 
 Update an agent's name and metadata URI. Only the human owner can call this.

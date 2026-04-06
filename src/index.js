@@ -527,6 +527,98 @@ class AgentClient {
   }
 
   /**
+   * Upload memory content to IPFS (with auto-pinning) and store the CID on-chain.
+   *
+   * This is the one-stop method for developers who don't want to manage IPFS manually.
+   * It handles: JSON serialization → IPFS upload → pinning → on-chain storeMemory().
+   *
+   * Supported pinning providers:
+   *   - 'pinata'   — requires { pinataJwt } in options
+   *   - 'x1scroll' — uses x1scroll.io IPFS node (free, rate-limited). Default.
+   *
+   * Fee: 0.001 XNT (same as storeMemory — automatic).
+   *
+   * @param {Keypair}  agentKeypair        The agent's keypair — must be a real Signer
+   * @param {string}   agentRecordHuman    The human wallet address that owns this agent
+   * @param {string}   topic               Memory topic label (max 64 chars)
+   * @param {object|string} content        Memory content — object (auto-serialized) or string
+   * @param {object}   [options={}]
+   * @param {string}   [options.provider='x1scroll']  Pinning provider: 'pinata' | 'x1scroll'
+   * @param {string}   [options.pinataJwt]             Required if provider='pinata'
+   * @param {string[]} [options.tags=[]]               Tags (max 5)
+   * @param {boolean}  [options.encrypted=false]       Whether content is encrypted before upload
+   * @returns {Promise<{ txSig: string, memoryEntryPDA: string, cid: string }>}
+   */
+  async uploadMemory(agentKeypair, agentRecordHuman, topic, content, options = {}) {
+    const {
+      provider  = 'x1scroll',
+      pinataJwt = null,
+      tags      = [],
+      encrypted = false,
+    } = options;
+
+    // Serialize content
+    const body = (typeof content === 'string') ? content : JSON.stringify(content);
+
+    let cid;
+
+    if (provider === 'pinata') {
+      if (!pinataJwt) {
+        throw new AgentSDKError(
+          'pinataJwt is required when provider is "pinata". Get one at https://pinata.cloud',
+          'MISSING_PINATA_JWT'
+        );
+      }
+      // Upload to Pinata — returns IpfsHash
+      const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${pinataJwt}`,
+        },
+        body: JSON.stringify({ pinataContent: body, pinataMetadata: { name: topic } }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new AgentSDKError(`Pinata upload failed: ${err}`, 'PINATA_ERROR');
+      }
+      const json = await res.json();
+      cid = json.IpfsHash;
+
+    } else if (provider === 'x1scroll') {
+      // Upload to x1scroll.io IPFS node (free, rate-limited)
+      const res = await fetch('https://ipfs.x1scroll.io/upload', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({ content: body, topic, agentPubkey: agentKeypair.publicKey.toBase58() }),
+      });
+      if (!res.ok) {
+        throw new AgentSDKError(
+          `x1scroll IPFS upload failed (${res.status}). Use provider='pinata' for production workloads.`,
+          'X1SCROLL_IPFS_ERROR'
+        );
+      }
+      const json = await res.json();
+      cid = json.cid;
+
+    } else {
+      throw new AgentSDKError(
+        `Unknown provider "${provider}". Supported: 'pinata', 'x1scroll'`,
+        'INVALID_PROVIDER'
+      );
+    }
+
+    if (!cid) {
+      throw new AgentSDKError('IPFS upload returned no CID', 'NO_CID');
+    }
+
+    // Store CID on-chain
+    const result = await this.storeMemory(agentKeypair, agentRecordHuman, topic, cid, tags, encrypted);
+
+    return { ...result, cid };
+  }
+
+  /**
    * Update an agent's name and metadata URI.
    * Only the human owner can call this. Free (network tx fee only).
    *

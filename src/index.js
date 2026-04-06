@@ -30,6 +30,9 @@ const bs58decode = (typeof bs58.decode === 'function') ? bs58.decode : bs58.defa
 // ── Registry cache TTL ────────────────────────────────────────────────────────
 const REGISTRY_CACHE_TTL = 5 * 60 * 1000; // 5 minutes in ms
 
+// ── Validator Storage Registry Program (LIVE on X1 Mainnet) ──────────────────
+const STORAGE_REGISTRY_PROGRAM_ID = new PublicKey('GqzvCjz8nzxWxH39twk4oPfFaHXeyVDty9oJ6F4UcfF5');
+
 // ── Fallback validators — used when registry is empty or unreachable ───────────
 const FALLBACK_VALIDATORS = [
   { endpoint: 'https://x1scroll.io/api/ipfs/upload', active: true, fallback: true },
@@ -371,8 +374,9 @@ class AgentClient {
     if (this._registryCache && now < this._registryCacheExpiry) {
       return this._registryCache;
     }
-    // For now: return fallback (registry program not deployed yet)
-    // When program is live, this queries on-chain StorageNode accounts
+    // Registry program is live: GqzvCjz8nzxWxH39twk4oPfFaHXeyVDty9oJ6F4UcfF5
+    // TODO: query on-chain StorageNode accounts via getProgramAccounts
+    // For now: return fallback while validator onboarding ramps up
     this._registryCache = FALLBACK_VALIDATORS;
     this._registryCacheExpiry = now + REGISTRY_CACHE_TTL;
     return this._registryCache;

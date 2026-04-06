@@ -122,28 +122,38 @@ const { txSig, memoryEntryPDA } = await client.storeMemory(
 
 **Fee:** 0.001 XNT (same as `storeMemory`)
 
-Requires a free [Pinata](https://pinata.cloud) API key (free tier: 100 pins, 1GB — enough for development and testing).
+By default, content is pinned to the **x1scroll validator network** — no API key, no configuration needed. Pinata is available as an alternative for production workloads requiring independent pinning.
 
 ```js
+// Default: pinned to x1scroll validator network (zero config)
 const { txSig, cid } = await client.uploadMemory(
   agentKeypair,
   humanWallet.publicKey.toBase58(),
   'session-2026-04-06',
   { summary: 'Discussed SDK launch', decisions: ['publish to npm', 'BSL license'] },
-  { pinataJwt: process.env.PINATA_JWT, tags: ['session', 'daily'] }
+  { tags: ['session', 'daily'] }
 );
-// Content is pinned on IPFS, CID stored on X1. Done.
+
+// Alternative: Pinata (bring your own key)
+const { txSig, cid } = await client.uploadMemory(
+  agentKeypair,
+  humanWallet.publicKey.toBase58(),
+  'session-2026-04-06',
+  { summary: 'Discussed SDK launch' },
+  { provider: 'pinata', pinataJwt: process.env.PINATA_JWT }
+);
 ```
 
 | Option | Type | Default | Description |
 |--------|------|---------|-------------|
-| `pinataJwt` | `string` | — | **Required.** Get free at pinata.cloud |
+| `provider` | `string` | `'x1scroll'` | `'x1scroll'` (validator network) or `'pinata'` |
+| `pinataJwt` | `string` | — | Required only if provider is `'pinata'` |
 | `tags` | `string[]` | `[]` | Up to 5 tags |
 | `encrypted` | `boolean` | `false` | Whether content is encrypted |
 
 **Returns:** `Promise<{ txSig: string, memoryEntryPDA: string, cid: string }>`
 
-> **Use `uploadMemory()` if you want zero IPFS configuration.** Use `storeMemory()` directly if you manage your own pinning infrastructure.
+> **Use `uploadMemory()` for zero-config IPFS pinning.** Content is pinned to x1scroll validator infrastructure — as long as X1 runs, your agent remembers. Use `storeMemory()` directly if you manage your own pinning.
 
 ---
 

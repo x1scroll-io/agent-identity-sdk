@@ -1,6 +1,6 @@
 {
   "name": "@x1scroll/agent-sdk",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Agent identity and on-chain memory protocol for X1 blockchain",
   "license": "BSL-1.1",
   "main": "src/index.js",

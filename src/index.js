@@ -551,38 +551,63 @@ class AgentClient {
    */
   async uploadMemory(agentKeypair, agentRecordHuman, topic, content, options = {}) {
     const {
+      provider  = 'x1scroll',
       pinataJwt = null,
       tags      = [],
       encrypted = false,
     } = options;
-
-    if (!pinataJwt) {
-      throw new AgentSDKError(
-        'pinataJwt is required for uploadMemory(). Get a free API key at https://pinata.cloud (free tier: 100 pins, 1GB). Pass it as options.pinataJwt.',
-        'MISSING_PINATA_JWT'
-      );
-    }
 
     // Serialize content
     const body = (typeof content === 'string') ? content : JSON.stringify(content);
 
     let cid;
 
-    // Upload to Pinata — auto-pinned, persistent
-    const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
-      method:  'POST',
-      headers: {
-        'Content-Type':  'application/json',
-        'Authorization': `Bearer ${pinataJwt}`,
-      },
-      body: JSON.stringify({ pinataContent: body, pinataMetadata: { name: topic } }),
-    });
-    if (!res.ok) {
-      const err = await res.text();
-      throw new AgentSDKError(`Pinata upload failed: ${err}`, 'PINATA_ERROR');
+    if (provider === 'x1scroll' || !provider) {
+      // Upload to x1scroll validator network — pinned across X1 infrastructure
+      const res = await fetch('https://x1scroll.io/api/ipfs/upload', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body:    JSON.stringify({
+          content:    body,
+          topic,
+          agentPubkey: agentKeypair.publicKey.toBase58(),
+        }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new AgentSDKError(`x1scroll IPFS upload failed (${res.status}): ${err}`, 'X1SCROLL_IPFS_ERROR');
+      }
+      const json = await res.json();
+      cid = json.cid;
+
+    } else if (provider === 'pinata') {
+      if (!pinataJwt) {
+        throw new AgentSDKError(
+          'pinataJwt is required when provider is "pinata". Get one at https://pinata.cloud',
+          'MISSING_PINATA_JWT'
+        );
+      }
+      const res = await fetch('https://api.pinata.cloud/pinning/pinJSONToIPFS', {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${pinataJwt}`,
+        },
+        body: JSON.stringify({ pinataContent: body, pinataMetadata: { name: topic } }),
+      });
+      if (!res.ok) {
+        const err = await res.text();
+        throw new AgentSDKError(`Pinata upload failed: ${err}`, 'PINATA_ERROR');
+      }
+      const json = await res.json();
+      cid = json.IpfsHash;
+
+    } else {
+      throw new AgentSDKError(
+        `Unknown provider "${provider}". Supported: 'x1scroll' (default), 'pinata'`,
+        'INVALID_PROVIDER'
+      );
     }
-    const json = await res.json();
-    cid = json.IpfsHash;
 
     if (!cid) {
       throw new AgentSDKError('IPFS upload returned no CID', 'NO_CID');

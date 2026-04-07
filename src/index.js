@@ -50,10 +50,10 @@ const PROGRAM_ID = new PublicKey('ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB')
  * Fee collector wallet. Built into every instruction on-chain.
  * Developers don't configure fees — the program handles it automatically.
  */
-// GmvrL1 — treasury address hardcoded in the deployed program (ECgaMEwH4...)
+// A1TRS — treasury address hardcoded in the deployed program (ECgaMEwH4...)
 // This must match exactly what was compiled into the on-chain binary.
-// Do NOT change without redeploying the program.
-const TREASURY = new PublicKey('GmvrL1ymC9ENuQCUqymC9robGa9t9L59AbFiwhDDd4Ld');
+// Updated 2026-04-07: upgraded program to use A1TRS treasury. TX: f9vkecPJWH6K6cxthi2aagDaeuTTDMU5NuB7W7bzZUTfXKaKWrGG319FN6TPdYZnBGpaT5WLo9hSBHNRzZiu2E2
+const TREASURY = new PublicKey('A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK');
 
 const DEFAULT_RPC_URL = 'https://x1scroll.io/rpc';
 

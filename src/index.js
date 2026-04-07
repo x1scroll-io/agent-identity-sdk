@@ -1293,6 +1293,240 @@ class AgentClient {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// PinningRegistryClient
+// ─────────────────────────────────────────────────────────────────────────────
+
+const PINNING_REGISTRY_PROGRAM_ID = new PublicKey('4XiYhW1qiasbDyK1nNmPVViNvhLEqgZG7ufC1U9ixBK6');
+
+// Instruction discriminators (from IDL)
+const PINNING_DISCRIMINATORS = {
+  initialize:          Buffer.from([175, 175, 109,  31,  13, 152, 155, 237]),
+  register_validator:  Buffer.from([118,  98, 251,  58,  81,  30,  13, 240]),
+  deregister_validator:Buffer.from([141,  36, 209, 110, 154, 252, 220, 211]),
+  confirm_pin:         Buffer.from([185,  11, 197, 147, 205, 218, 192,  22]),
+  confirm_recall:      Buffer.from([ 39, 101,  77, 135,  63,  47, 166, 179]),
+  record_miss:         Buffer.from([148, 189, 161,  48, 143,  99, 130,  31]),
+  get_next_validator:  Buffer.from([248,  29, 205, 168,  56, 167, 176,  16]),
+};
+
+/**
+ * PinningRegistryClient — interact with the x1scroll Pinning Registry on X1.
+ *
+ * Program ID: 4XiYhW1qiasbDyK1nNmPVViNvhLEqgZG7ufC1U9ixBK6  (immutable)
+ * Treasury:   A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK  (20% of every pin + recall)
+ *
+ * Usage:
+ *   const registry = new PinningRegistryClient();
+ *   await registry.registerValidator(validatorKeypair, 'https://my-node.x1scroll.io');
+ *   await registry.confirmPin(validatorKeypair, agentKeypair, cid, feeLamports);
+ */
+class PinningRegistryClient {
+  /**
+   * @param {string} [rpcUrl] - X1 RPC endpoint (default: GorillaServers)
+   */
+  constructor(rpcUrl = DEFAULT_RPC_URL) {
+    this.connection = new Connection(rpcUrl, 'confirmed');
+    this.programId  = PINNING_REGISTRY_PROGRAM_ID;
+    this.treasury   = TREASURY;
+  }
+
+  // ── PDA derivation ──────────────────────────────────────────────────────────
+
+  getRegistryPda() {
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+      [Buffer.from('registry')],
+      this.programId
+    );
+    return { pda, bump };
+  }
+
+  getValidatorRecordPda(authorityPubkey) {
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+      [Buffer.from('validator'), new PublicKey(authorityPubkey).toBuffer()],
+      this.programId
+    );
+    return { pda, bump };
+  }
+
+  // ── Helpers ─────────────────────────────────────────────────────────────────
+
+  async _sendTx(ix, signers) {
+    const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
+    const tx = new Transaction();
+    tx.add(ix);
+    tx.recentBlockhash = blockhash;
+    tx.lastValidBlockHeight = lastValidBlockHeight;
+    tx.feePayer = signers[0].publicKey;
+    const { sendAndConfirmTransaction } = require('@solana/web3.js');
+    return sendAndConfirmTransaction(this.connection, tx, signers, { commitment: 'confirmed' });
+  }
+
+  // ── Instructions ─────────────────────────────────────────────────────────────
+
+  /**
+   * One-time registry initialization. Sets the treasury address.
+   * Only call once — program is immutable after deploy.
+   *
+   * @param {Keypair} authorityKeypair - Payer and authority
+   * @returns {string} Transaction signature
+   */
+  async initialize(authorityKeypair) {
+    const { pda: registryPda } = this.getRegistryPda();
+    const data = Buffer.concat([
+      PINNING_DISCRIMINATORS.initialize,
+      this.treasury.toBuffer(),
+    ]);
+    const ix = new TransactionInstruction({
+      programId: this.programId,
+      keys: [
+        { pubkey: registryPda,                     isSigner: false, isWritable: true  },
+        { pubkey: authorityKeypair.publicKey,       isSigner: true,  isWritable: true  },
+        { pubkey: SystemProgram.programId,          isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    return this._sendTx(ix, [authorityKeypair]);
+  }
+
+  /**
+   * Register a validator with their IPFS pinning endpoint. Free.
+   *
+   * @param {Keypair} validatorKeypair - Validator authority keypair
+   * @param {string}  endpoint         - IPFS pinning endpoint URL (max 256 chars)
+   * @returns {string} Transaction signature
+   */
+  async registerValidator(validatorKeypair, endpoint) {
+    if (endpoint.length > 256) throw new Error('Endpoint too long (max 256 chars)');
+    const { pda: registryPda }      = this.getRegistryPda();
+    const { pda: validatorRecordPda } = this.getValidatorRecordPda(validatorKeypair.publicKey);
+
+    // Encode endpoint as borsh string: u32 LE length prefix + utf8 bytes
+    const endpointBytes = Buffer.from(endpoint, 'utf8');
+    const lenBuf = Buffer.allocUnsafe(4);
+    lenBuf.writeUInt32LE(endpointBytes.length, 0);
+    const data = Buffer.concat([
+      PINNING_DISCRIMINATORS.register_validator,
+      lenBuf,
+      endpointBytes,
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: this.programId,
+      keys: [
+        { pubkey: registryPda,                     isSigner: false, isWritable: true  },
+        { pubkey: validatorRecordPda,               isSigner: false, isWritable: true  },
+        { pubkey: validatorKeypair.publicKey,       isSigner: true,  isWritable: true  },
+        { pubkey: SystemProgram.programId,          isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    return this._sendTx(ix, [validatorKeypair]);
+  }
+
+  /**
+   * Deregister a validator — closes PDA and returns rent.
+   *
+   * @param {Keypair} validatorKeypair
+   * @returns {string} Transaction signature
+   */
+  async deregisterValidator(validatorKeypair) {
+    const { pda: registryPda }        = this.getRegistryPda();
+    const { pda: validatorRecordPda } = this.getValidatorRecordPda(validatorKeypair.publicKey);
+
+    const ix = new TransactionInstruction({
+      programId: this.programId,
+      keys: [
+        { pubkey: registryPda,               isSigner: false, isWritable: true  },
+        { pubkey: validatorRecordPda,         isSigner: false, isWritable: true  },
+        { pubkey: validatorKeypair.publicKey, isSigner: true,  isWritable: true  },
+      ],
+      data: PINNING_DISCRIMINATORS.deregister_validator,
+    });
+    return this._sendTx(ix, [validatorKeypair]);
+  }
+
+  /**
+   * Validator confirms they pinned a CID. Splits fee 80% validator / 20% treasury.
+   *
+   * @param {Keypair} validatorKeypair - Validator authority (signs + receives 80%)
+   * @param {Keypair} agentKeypair     - Agent who pays the fee
+   * @param {string}  cid              - IPFS CID (max 128 chars)
+   * @param {number}  feeLamports      - Fee in lamports to split
+   * @returns {string} Transaction signature
+   */
+  async confirmPin(validatorKeypair, agentKeypair, cid, feeLamports) {
+    return this._confirmOp('confirm_pin', validatorKeypair, agentKeypair, cid, feeLamports);
+  }
+
+  /**
+   * Validator confirms they served a memory recall. Same 80/20 split.
+   *
+   * @param {Keypair} validatorKeypair
+   * @param {Keypair} agentKeypair
+   * @param {string}  cid
+   * @param {number}  feeLamports
+   * @returns {string} Transaction signature
+   */
+  async confirmRecall(validatorKeypair, agentKeypair, cid, feeLamports) {
+    return this._confirmOp('confirm_recall', validatorKeypair, agentKeypair, cid, feeLamports);
+  }
+
+  async _confirmOp(opName, validatorKeypair, agentKeypair, cid, feeLamports) {
+    if (cid.length > 128) throw new Error('CID too long (max 128 chars)');
+    const { pda: registryPda }        = this.getRegistryPda();
+    const { pda: validatorRecordPda } = this.getValidatorRecordPda(validatorKeypair.publicKey);
+
+    // Encode: cid (borsh string) + agent pubkey (32 bytes) + fee_lamports (u64 LE)
+    const cidBytes = Buffer.from(cid, 'utf8');
+    const cidLen   = Buffer.allocUnsafe(4);
+    cidLen.writeUInt32LE(cidBytes.length, 0);
+    const feeBuf = Buffer.allocUnsafe(8);
+    feeBuf.writeBigUInt64LE(BigInt(feeLamports), 0);
+
+    const data = Buffer.concat([
+      PINNING_DISCRIMINATORS[opName],
+      cidLen,
+      cidBytes,
+      new PublicKey(agentKeypair.publicKey).toBuffer(),
+      feeBuf,
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: this.programId,
+      keys: [
+        { pubkey: registryPda,                     isSigner: false, isWritable: false },
+        { pubkey: validatorRecordPda,               isSigner: false, isWritable: true  },
+        { pubkey: agentKeypair.publicKey,           isSigner: true,  isWritable: true  },
+        { pubkey: validatorKeypair.publicKey,       isSigner: true,  isWritable: true  },
+        { pubkey: this.treasury,                    isSigner: false, isWritable: true  },
+        { pubkey: SystemProgram.programId,          isSigner: false, isWritable: false },
+      ],
+      data,
+    });
+    return this._sendTx(ix, [agentKeypair, validatorKeypair]);
+  }
+
+  /**
+   * Read the current registry state on-chain.
+   *
+   * @returns {{ treasury: string, validatorCount: number, activeValidatorCount: number, rotationCounter: number }}
+   */
+  async getRegistryState() {
+    const { pda } = this.getRegistryPda();
+    const info = await this.connection.getAccountInfo(pda);
+    if (!info) throw new Error('Registry not initialized on-chain');
+    // Layout: 8 discriminator + 32 treasury + 8 validator_count + 8 active_validator_count + 8 rotation_counter + 1 bump
+    const d = info.data;
+    return {
+      treasury:             new PublicKey(d.slice(8, 40)).toBase58(),
+      validatorCount:       Number(d.readBigUInt64LE(40)),
+      activeValidatorCount: Number(d.readBigUInt64LE(48)),
+      rotationCounter:      Number(d.readBigUInt64LE(56)),
+    };
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -1313,9 +1547,11 @@ function getAgentPda(agentPublicKey) {
 
 module.exports = {
   AgentClient,
+  PinningRegistryClient,
   AgentSDKError,
   getAgentPda,
   PROGRAM_ID,
+  PINNING_REGISTRY_PROGRAM_ID,
   TREASURY,
   DEFAULT_RPC_URL,
 };

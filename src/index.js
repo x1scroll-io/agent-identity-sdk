@@ -592,7 +592,7 @@ class AgentClient {
    */
   async register(humanKeypair, agentKeypair, agentId, memoryCid, manifestCid) {
     // v3 design: human owns + pays, agent co-signs (anti-squatting)
-    // PDA seeds: [b"agent", agent_identity.key()]
+    // PDA seeds: [b"agent", agent_authority.key()] — authority is the HUMAN (payer), not the agent keypair
     assertIsSigner(humanKeypair, 'humanKeypair');
     assertIsSigner(agentKeypair, 'agentKeypair');
 
@@ -603,7 +603,8 @@ class AgentClient {
     // Human pays: 0.05 XNT fee + rent (~0.012 XNT)
     await this._assertSufficientBalance(humanKeypair, 65_000_000, 'register_agent (0.05 XNT fee + rent)');
 
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    // PDA derived from human authority key — matches program: seeds=[b"agent", agent_authority.key()]
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(humanKeypair.publicKey);
 
     const data = Buffer.concat([
       DISCRIMINATORS.register_agent,

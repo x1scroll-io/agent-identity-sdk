@@ -50,10 +50,10 @@ const PROGRAM_ID = new PublicKey('ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB')
  * Fee collector wallet. Built into every instruction on-chain.
  * Developers don't configure fees — the program handles it automatically.
  */
-// A1TRS — consolidated x1scroll revenue treasury (updated 2026-04-07)
-// All SDK instruction fees (register, storeMemory, updateAgent, transferAgent,
-// decisionWrite, branchOpen, branchClose) route here.
-const TREASURY = new PublicKey('A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK');
+// GmvrL1 — treasury address hardcoded in the deployed program (ECgaMEwH4...)
+// This must match exactly what was compiled into the on-chain binary.
+// Do NOT change without redeploying the program.
+const TREASURY = new PublicKey('GmvrL1ymC9ENuQCUqymC9robGa9t9L59AbFiwhDDd4Ld');
 
 const DEFAULT_RPC_URL = 'https://x1scroll.io/rpc';
 

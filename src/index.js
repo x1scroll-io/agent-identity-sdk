@@ -1298,6 +1298,10 @@ class AgentClient {
 
 const PINNING_REGISTRY_PROGRAM_ID = new PublicKey('4XiYhW1qiasbDyK1nNmPVViNvhLEqgZG7ufC1U9ixBK6');
 
+// Standard fee for pin + recall operations: 0.001 XNT (1,000,000 lamports)
+// 80% → validator, 20% → A1TRS treasury (enforced on-chain)
+const DEFAULT_PIN_FEE_LAMPORTS = 1_000_000;
+
 // Instruction discriminators (from IDL)
 const PINNING_DISCRIMINATORS = {
   initialize:          Buffer.from([175, 175, 109,  31,  13, 152, 155, 237]),
@@ -1457,27 +1461,29 @@ class PinningRegistryClient {
 
   /**
    * Validator confirms they pinned a CID. Splits fee 80% validator / 20% treasury.
+   * Standard fee: 0.001 XNT (DEFAULT_PIN_FEE_LAMPORTS). Override with feeLamports if needed.
    *
    * @param {Keypair} validatorKeypair - Validator authority (signs + receives 80%)
    * @param {Keypair} agentKeypair     - Agent who pays the fee
    * @param {string}  cid              - IPFS CID (max 128 chars)
-   * @param {number}  feeLamports      - Fee in lamports to split
+   * @param {number}  [feeLamports]    - Fee in lamports (default: 0.001 XNT = 1,000,000)
    * @returns {string} Transaction signature
    */
-  async confirmPin(validatorKeypair, agentKeypair, cid, feeLamports) {
+  async confirmPin(validatorKeypair, agentKeypair, cid, feeLamports = DEFAULT_PIN_FEE_LAMPORTS) {
     return this._confirmOp('confirm_pin', validatorKeypair, agentKeypair, cid, feeLamports);
   }
 
   /**
    * Validator confirms they served a memory recall. Same 80/20 split.
+   * Standard fee: 0.001 XNT (DEFAULT_PIN_FEE_LAMPORTS). Override with feeLamports if needed.
    *
    * @param {Keypair} validatorKeypair
    * @param {Keypair} agentKeypair
    * @param {string}  cid
-   * @param {number}  feeLamports
+   * @param {number}  [feeLamports]    - Fee in lamports (default: 0.001 XNT = 1,000,000)
    * @returns {string} Transaction signature
    */
-  async confirmRecall(validatorKeypair, agentKeypair, cid, feeLamports) {
+  async confirmRecall(validatorKeypair, agentKeypair, cid, feeLamports = DEFAULT_PIN_FEE_LAMPORTS) {
     return this._confirmOp('confirm_recall', validatorKeypair, agentKeypair, cid, feeLamports);
   }
 
@@ -1680,4 +1686,5 @@ module.exports = {
   PINNING_REGISTRY_PROGRAM_ID,
   TREASURY,
   DEFAULT_RPC_URL,
+  DEFAULT_PIN_FEE_LAMPORTS,
 };

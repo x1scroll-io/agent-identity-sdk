@@ -661,7 +661,7 @@ class AgentClient {
    * @param {Buffer|null}    [parentHash]   32-byte parent decision hash; zeros for root
    * @returns {Promise<{ sig: string, decisionHash: string, pda: string }>}
    */
-  async decisionWrite(humanKeypair, branchLabel, cid, outcome, confidence, parentHash = null) {
+  async decisionWrite(humanKeypair, branchLabel, cid, outcome = 1, confidence = 8200, parentHash = null) {
     assertIsSigner(humanKeypair, 'humanKeypair');
 
     validateString(branchLabel, 'branchLabel', 64);

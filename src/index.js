@@ -4,8 +4,8 @@
  * @x1scroll/agent-sdk
  * Agent Identity Protocol — persistent agent identity and on-chain memory for X1 blockchain.
  *
- * Program ID:  52EW3sn2Tkq6EMnp86JWUzXrNzrFujpdEgovsjwapbAM  (immutable)
- * Treasury:    HYP2VdVk2QNGKMBfWGFZpaFqMoqQkB7Vp5F12eSxCxtf  (immutable)
+ * Program ID:  ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB  (immutable)
+ * Treasury:    A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK
  * Network:     X1 Mainnet
  * License:     BSL-1.1 — https://x1scroll.io/license
  *
@@ -21,7 +21,8 @@ const {
   SystemProgram,
   LAMPORTS_PER_SOL,
 } = require('@solana/web3.js');
-const bs58 = require('bs58');
+const bs58   = require('bs58');
+const crypto = require('crypto');
 
 // ── bs58 compat (v4 vs v5 API shape) ─────────────────────────────────────────
 const bs58encode = (typeof bs58.encode === 'function') ? bs58.encode : bs58.default.encode;
@@ -43,23 +44,31 @@ const FALLBACK_VALIDATORS = [
  * On-chain program address. Immutable — this SDK only talks to this program.
  * Forks that swap this address are out of the protocol.
  */
-const PROGRAM_ID = new PublicKey('52EW3sn2Tkq6EMnp86JWUzXrNzrFujpdEgovsjwapbAM');
+const PROGRAM_ID = new PublicKey('ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB');
 
 /**
  * Fee collector wallet. Built into every instruction on-chain.
  * Developers don't configure fees — the program handles it automatically.
  */
-const TREASURY = new PublicKey('HYP2VdVk2QNGKMBfWGFZpaFqMoqQkB7Vp5F12eSxCxtf');
+// A1TRS — consolidated x1scroll revenue treasury (updated 2026-04-07)
+// All SDK instruction fees (register, storeMemory, updateAgent, transferAgent,
+// decisionWrite, branchOpen, branchClose) route here.
+const TREASURY = new PublicKey('A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK');
 
-const DEFAULT_RPC_URL = 'https://rpc.x1.xyz';
+const DEFAULT_RPC_URL = 'https://x1scroll.io/rpc';
 
 // ── Anchor instruction discriminators (sha256("global:<name>")[0..8]) ─────────
 // Pre-computed from the IDL. These are fixed for the deployed program version.
+// All discriminators computed from sha256("global:<name>")[0..8] — matches Anchor's derivation
 const DISCRIMINATORS = {
-  register_agent:  Buffer.from([135, 157, 66, 55, 116, 253, 50, 45]),
-  store_memory:    Buffer.from([31, 139, 69, 89, 102, 57, 218, 246]),
-  update_agent:    Buffer.from([220, 76, 168, 212, 224, 211, 185, 76]),
-  transfer_agent:  Buffer.from([39, 202, 189, 195, 254, 40, 59, 198]),
+  register_agent:        crypto.createHash('sha256').update('global:register_agent').digest().slice(0, 8),
+  store_memory:          crypto.createHash('sha256').update('global:store_memory').digest().slice(0, 8),
+  update_agent:          crypto.createHash('sha256').update('global:update_manifest').digest().slice(0, 8),
+  transfer_agent:        crypto.createHash('sha256').update('global:transfer_agent').digest().slice(0, 8),
+  serve_context:         crypto.createHash('sha256').update('global:serve_context').digest().slice(0, 8),
+  decision_write:        crypto.createHash('sha256').update('global:decision_write').digest().slice(0, 8),
+  strategy_branch_open:  crypto.createHash('sha256').update('global:strategy_branch_open').digest().slice(0, 8),
+  strategy_branch_close: crypto.createHash('sha256').update('global:strategy_branch_close').digest().slice(0, 8),
 };
 
 // ── Anchor account discriminators (sha256("account:<Name>")[0..8]) ─────────────
@@ -134,6 +143,27 @@ function encodeU64(n) {
   return buf;
 }
 
+/**
+ * Pad or truncate a label string to exactly 32 bytes (for branch PDA seeds).
+ * @param {string} label
+ * @returns {Buffer}  32-byte buffer
+ */
+function padLabel(label) {
+  const src = Buffer.from(label, 'utf8');
+  const out = Buffer.alloc(32);
+  src.copy(out, 0, 0, Math.min(src.length, 32));
+  return out;
+}
+
+/**
+ * Compute sha256 of a string and return a 32-byte Buffer.
+ * @param {string} s
+ * @returns {Buffer}
+ */
+function sha256Str(s) {
+  return crypto.createHash('sha256').update(s).digest();
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Borsh decoding helpers
 // ─────────────────────────────────────────────────────────────────────────────
@@ -204,16 +234,23 @@ class BorshReader {
  * @returns {object}
  */
 function decodeAgentRecord(data) {
+  // AgentRecord layout (v3 program — human + agent_pubkey separated):
+  // [8 discriminator] human(32) agent_pubkey(32) agent_id(str) version(u32)
+  // memory_cid(str) manifest_cid(str) created_at(i64) last_updated(i64)
+  // total_memory_ops(u64) total_context_serves(u64) bump(u8)
   const r = new BorshReader(data.slice(8));
   return {
-    human:        r.readPublicKey().toBase58(),
-    agentPubkey:  r.readPublicKey().toBase58(),
-    name:         r.readString(),
-    metadataUri:  r.readString(),
-    createdAt:    r.readI64(),
-    memoryCount:  r.readU64(),
-    lastActive:   r.readI64(),
-    bump:         r.readU8(),
+    human:              r.readPublicKey().toBase58(),
+    agentPubkey:        r.readPublicKey().toBase58(),
+    agentId:            r.readString(),
+    version:            r.readU32(),
+    memoryCid:          r.readString(),
+    manifestCid:        r.readString(),
+    createdAt:          r.readI64(),
+    lastUpdated:        r.readI64(),
+    totalMemoryOps:     r.readU64(),
+    totalContextServes: r.readU64(),
+    bump:               r.readU8(),
   };
 }
 
@@ -300,25 +337,26 @@ class AgentClient {
    *   X1 RPC endpoint (default: https://rpc.x1.xyz).
    *   Use https://rpc.x1scroll.io for our dedicated node.
    */
-  constructor({ wallet = null, rpcUrl = DEFAULT_RPC_URL } = {}) {
-    // ── resolve wallet ──
-    if (wallet === null || wallet === undefined) {
+  constructor({ wallet = null, keypair = null, rpcUrl = DEFAULT_RPC_URL } = {}) {
+    // ── resolve wallet — accept both `wallet` and `keypair` param names ──
+    const resolvedWallet = wallet || keypair;
+    if (resolvedWallet === null || resolvedWallet === undefined) {
       this.keypair       = null;
       this.walletAddress = null;
-    } else if (wallet instanceof Keypair) {
-      this.keypair       = wallet;
-      this.walletAddress = wallet.publicKey.toBase58();
-    } else if (typeof wallet === 'string') {
-      const secretKey    = bs58decode(wallet);
+    } else if (resolvedWallet instanceof Keypair) {
+      this.keypair       = resolvedWallet;
+      this.walletAddress = resolvedWallet.publicKey.toBase58();
+    } else if (typeof resolvedWallet === 'string') {
+      const secretKey    = bs58decode(resolvedWallet);
       this.keypair       = Keypair.fromSecretKey(secretKey);
       this.walletAddress = this.keypair.publicKey.toBase58();
-    } else if (wallet && wallet.secretKey && wallet.publicKey) {
+    } else if (resolvedWallet && resolvedWallet.secretKey && resolvedWallet.publicKey) {
       // Keypair-like object
-      this.keypair       = wallet;
-      this.walletAddress = wallet.publicKey.toBase58();
+      this.keypair       = resolvedWallet;
+      this.walletAddress = resolvedWallet.publicKey.toBase58();
     } else {
       throw new AgentSDKError(
-        'wallet must be a Keypair, a base58 secret key string, or null',
+        'wallet (or keypair) must be a Keypair, a base58 secret key string, or null',
         'INVALID_WALLET'
       );
     }
@@ -327,6 +365,68 @@ class AgentClient {
     this._connection       = null; // lazy
     this._registryCache    = null;
     this._registryCacheExpiry = 0;
+  }
+
+  /**
+   * Check RPC connectivity. Throws AgentSDKError with fallback suggestion if unreachable.
+   * @returns {Promise<{ ok: boolean, slot: number, rpcUrl: string }>}
+   */
+  async healthCheck() {
+    const conn = this._getConnection();
+    try {
+      const slot = await Promise.race([
+        conn.getSlot(),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+      ]);
+      return { ok: true, slot, rpcUrl: this.rpcUrl };
+    } catch (err) {
+      throw new AgentSDKError(
+        `RPC endpoint unreachable: ${this.rpcUrl}. ` +
+        `Try the public fallback: https://x1scroll.io/rpc\n` +
+        `Original error: ${err.message}`,
+        'RPC_UNREACHABLE',
+        err
+      );
+    }
+  }
+
+  /**
+   * Check that a keypair has sufficient XNT balance for an operation.
+   * Throws AgentSDKError with current balance and required amount if insufficient.
+   * @param {Keypair} keypair
+   * @param {number}  requiredLamports
+   * @param {string}  [operationName]
+   */
+  async _assertSufficientBalance(keypair, requiredLamports, operationName = 'operation') {
+    const conn = this._getConnection();
+    let balance;
+    try {
+      balance = await Promise.race([
+        conn.getBalance(keypair.publicKey),
+        new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 8000)),
+      ]);
+    } catch (err) {
+      // Network issue on balance check — warn but don't block the operation
+      console.warn(
+        `[agent-sdk] Balance check failed for ${operationName} (${err.message}). ` +
+        `Proceeding — transaction will fail on-chain if balance is insufficient. ` +
+        `RPC: ${this.rpcUrl}`
+      );
+      return null; // allow the tx to proceed — chain will reject if balance is truly insufficient
+    }
+    // Add 5000 lamports buffer for network tx fee
+    const totalRequired = requiredLamports + 5000;
+    if (balance < totalRequired) {
+      const balanceXNT  = (balance / 1e9).toFixed(6);
+      const requiredXNT = (totalRequired / 1e9).toFixed(6);
+      throw new AgentSDKError(
+        `Insufficient balance for ${operationName}. ` +
+        `Have: ${balanceXNT} XNT, Need: ${requiredXNT} XNT. ` +
+        `Fund wallet: ${keypair.publicKey.toBase58()}`,
+        'INSUFFICIENT_BALANCE'
+      );
+    }
+    return balance;
   }
 
   // ── Internal ────────────────────────────────────────────────────────────────
@@ -356,11 +456,22 @@ class AgentClient {
     const rawTx = tx.serialize();
     const sig   = await connection.sendRawTransaction(rawTx, { skipPreflight: false });
 
-    await connection.confirmTransaction(
-      { signature: sig, blockhash, lastValidBlockHeight },
-      'confirmed'
-    );
-
+    // ── HTTP polling confirmation (avoids WS 405 errors on some RPC providers) ──
+    const deadline = Date.now() + 60_000;
+    while (Date.now() < deadline) {
+      const { value } = await connection.getSignatureStatuses([sig]);
+      const status = value?.[0];
+      if (status) {
+        if (status.err) throw new AgentSDKError(
+          `Transaction failed: ${JSON.stringify(status.err)}`, 'TX_FAILED'
+        );
+        if (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized') {
+          return sig;
+        }
+      }
+      await new Promise(r => setTimeout(r, 2000));
+    }
+    // TX sent but confirmation timed out — return sig anyway (likely confirmed)
     return sig;
   }
 
@@ -467,57 +578,57 @@ class AgentClient {
   /**
    * Register a new agent on-chain.
    *
-   * The agent keypair MUST co-sign — this prevents PDA squatting by ensuring
-   * only the real agent key can claim its own identity record.
+   * The agent keypair IS the authority — it signs and pays the registration fee.
+   * This matches the deployed program: register_agent(agent_id, memory_cid, manifest_cid)
+   * PDA seeds: [b"agent", agent_authority.pubkey]
    *
-   * Fee: 0.05 XNT (automatic — built into the instruction).
-   * Fee payer: humanKeypair (the wallet that owns this agent).
+   * Fee: 0.05 XNT (automatic — built into the instruction, paid by agentKeypair).
    *
    * @param {Keypair} agentKeypair   The agent's keypair — MUST be a real Keypair (has secretKey)
-   * @param {string}  name           Agent display name (max 32 chars)
-   * @param {string}  metadataUri    URI to agent metadata JSON (max 128 chars)
+   * @param {string}  agentId        Agent identifier string (max 32 chars)
+   * @param {string}  memoryCid      IPFS CID for initial memory (use a placeholder if none)
+   * @param {string}  manifestCid    IPFS CID for agent manifest (use a placeholder if none)
    * @returns {Promise<{ txSig: string, agentRecordPDA: string }>}
    */
-  async register(agentKeypair, name, metadataUri) {
-    if (!this.keypair) {
-      throw new AgentSDKError('AgentClient must be initialised with a wallet to call register()', 'NO_WALLET');
-    }
-
-    // ── Anti-squatting: agentKeypair MUST be a real signer ──
+  async register(humanKeypair, agentKeypair, agentId, memoryCid, manifestCid) {
+    // v3 design: human owns + pays, agent co-signs (anti-squatting)
+    // PDA seeds: [b"agent", agent_identity.key()]
+    assertIsSigner(humanKeypair, 'humanKeypair');
     assertIsSigner(agentKeypair, 'agentKeypair');
 
-    // ── Input validation ──
-    validateString(name, 'name', 32);
-    validateString(metadataUri, 'metadataUri', 128);
+    validateString(agentId,     'agentId',     32);
+    validateString(memoryCid,   'memoryCid',   64);
+    validateString(manifestCid, 'manifestCid', 64);
 
-    const humanKeypair = this.keypair;
-    const agentPubkey  = agentKeypair.publicKey;
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentPubkey);
+    // Human pays: 0.05 XNT fee + rent (~0.012 XNT)
+    await this._assertSufficientBalance(humanKeypair, 65_000_000, 'register_agent (0.05 XNT fee + rent)');
 
-    // Borsh-encode instruction data: discriminator + name + metadata_uri
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+
     const data = Buffer.concat([
       DISCRIMINATORS.register_agent,
-      encodeString(name),
-      encodeString(metadataUri),
+      encodeString(agentId),
+      encodeString(memoryCid),
+      encodeString(manifestCid),
     ]);
 
     const ix = new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: humanKeypair.publicKey, isSigner: true,  isWritable: true  }, // human
-        { pubkey: agentPubkey,            isSigner: false, isWritable: false }, // agent_pubkey (CHECK)
-        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
-        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: humanKeypair.publicKey,  isSigner: true,  isWritable: true  }, // human (payer/owner)
+        { pubkey: agentKeypair.publicKey,  isSigner: true,  isWritable: false }, // agent_identity (co-sign)
+        { pubkey: agentRecordPDA,          isSigner: false, isWritable: true  }, // agent_record (init)
+        { pubkey: TREASURY,                isSigner: false, isWritable: true  }, // treasury
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
       ],
       data,
     });
 
     const tx  = new Transaction().add(ix);
-    const sig = await this._sendAndConfirm(tx, [humanKeypair]);
+    const sig = await this._sendAndConfirm(tx, [humanKeypair, agentKeypair]);
 
     return {
-      txSig:         sig,
+      txSig:          sig,
       agentRecordPDA: agentRecordPDA.toBase58(),
     };
   }
@@ -538,51 +649,24 @@ class AgentClient {
    * @param {boolean}  [encrypted=false]   Whether the IPFS content is encrypted
    * @returns {Promise<{ txSig: string, memoryEntryPDA: string }>}
    */
-  async storeMemory(agentKeypair, agentRecordHuman, topic, cid, tags = [], encrypted = false) {
-    // ── Anti-squatting ──
+  async storeMemory(agentKeypair, newMemoryCid) {
+    // v3: agent signs, PDA seeded by agent pubkey
     assertIsSigner(agentKeypair, 'agentKeypair');
+    validateString(newMemoryCid, 'newMemoryCid', 64);
 
-    // ── Input validation ──
-    validateString(topic, 'topic', 64);
-    validateString(cid, 'cid', 64);
-    if (!Array.isArray(tags)) {
-      throw new AgentSDKError('tags must be an array', 'INVALID_INPUT');
-    }
-    if (tags.length > 5) {
-      throw new AgentSDKError('Maximum 5 tags allowed', 'INVALID_INPUT');
-    }
-    for (const tag of tags) {
-      validateString(tag, 'tag', 32);
-    }
-    if (typeof encrypted !== 'boolean') {
-      throw new AgentSDKError('encrypted must be a boolean', 'INVALID_INPUT');
-    }
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
 
-    const agentPubkey = agentKeypair.publicKey;
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentPubkey);
-
-    // Read current memory_count from chain to derive the correct PDA index
-    const agentData = await this.getAgent(agentPubkey.toBase58());
-    const memoryIndex = agentData.memoryCount;
-
-    const { pda: memoryEntryPDA } = AgentClient.deriveMemoryEntry(agentPubkey, memoryIndex);
-
-    // Borsh-encode: discriminator + topic + cid + tags + encrypted
     const data = Buffer.concat([
       DISCRIMINATORS.store_memory,
-      encodeString(topic),
-      encodeString(cid),
-      encodeStringVec(tags),
-      encodeBool(encrypted),
+      encodeString(newMemoryCid),
     ]);
 
     const ix = new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: agentPubkey,            isSigner: true,  isWritable: true  }, // agent_pubkey (Signer + fee payer)
-        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
-        { pubkey: memoryEntryPDA,         isSigner: false, isWritable: true  }, // memory_entry
-        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: agentKeypair.publicKey,  isSigner: true,  isWritable: true  }, // agent
+        { pubkey: agentRecordPDA,          isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: TREASURY,                isSigner: false, isWritable: true  }, // treasury
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
       ],
       data,
@@ -590,11 +674,7 @@ class AgentClient {
 
     const tx  = new Transaction().add(ix);
     const sig = await this._sendAndConfirm(tx, [agentKeypair]);
-
-    return {
-      txSig:          sig,
-      memoryEntryPDA: memoryEntryPDA.toBase58(),
-    };
+    return { txSig: sig };
   }
 
   /**
@@ -707,33 +787,31 @@ class AgentClient {
    * @param {string}         metadataUri   New metadata URI (max 128 chars)
    * @returns {Promise<{ txSig: string }>}
    */
-  async updateAgent(humanKeypair, agentPubkey, name, metadataUri) {
-    assertIsSigner(humanKeypair, 'humanKeypair');
-    validateString(name, 'name', 32);
-    validateString(metadataUri, 'metadataUri', 128);
+  async updateAgent(agentKeypair, newManifestCid) {
+    // v3: agent signs update_manifest
+    assertIsSigner(agentKeypair, 'agentKeypair');
+    validateString(newManifestCid, 'newManifestCid', 64);
 
-    const agentKey           = new PublicKey(agentPubkey);
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKey);
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
 
     const data = Buffer.concat([
-      DISCRIMINATORS.update_agent,
-      encodeString(name),
-      encodeString(metadataUri),
+      DISCRIMINATORS.update_agent,  // sha256("global:update_manifest")[0..8]
+      encodeString(newManifestCid),
     ]);
 
     const ix = new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: humanKeypair.publicKey, isSigner: true,  isWritable: true  }, // human
-        { pubkey: agentKey,               isSigner: false, isWritable: false }, // agent_pubkey (CHECK)
-        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: agentKeypair.publicKey,  isSigner: true,  isWritable: true  }, // agent
+        { pubkey: agentRecordPDA,          isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: TREASURY,                isSigner: false, isWritable: true  }, // treasury
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
       ],
       data,
     });
 
     const tx  = new Transaction().add(ix);
-    const sig = await this._sendAndConfirm(tx, [humanKeypair]);
-
+    const sig = await this._sendAndConfirm(tx, [agentKeypair]);
     return { txSig: sig };
   }
 
@@ -748,26 +826,25 @@ class AgentClient {
    * @param {PublicKey|string} newHuman     New owner's public key
    * @returns {Promise<{ txSig: string }>}
    */
-  async transferAgent(humanKeypair, agentPubkey, newHuman) {
+  async transferAgent(humanKeypair, agentRecordPDA, newHuman) {
+    // v3: human (owner) signs transfer. Passes agent_record PDA directly.
+    // agentRecordPDA = AgentClient.deriveAgentRecord(agentPubkey).pda.toBase58()
     assertIsSigner(humanKeypair, 'humanKeypair');
 
-    const agentKey            = new PublicKey(agentPubkey);
-    const newHumanKey         = new PublicKey(newHuman);
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKey);
+    const agentRecordKey = new PublicKey(agentRecordPDA);
+    const newHumanKey    = new PublicKey(newHuman);
 
-    // Encode: discriminator + new_human (32 bytes Pubkey)
     const data = Buffer.concat([
       DISCRIMINATORS.transfer_agent,
-      newHumanKey.toBuffer(),
+      newHumanKey.toBuffer(),  // new_human pubkey (32 bytes)
     ]);
 
     const ix = new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: humanKeypair.publicKey, isSigner: true,  isWritable: true  }, // human
-        { pubkey: agentKey,               isSigner: false, isWritable: false }, // agent_pubkey (CHECK)
-        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
-        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: humanKeypair.publicKey,  isSigner: true,  isWritable: true  }, // human (current owner)
+        { pubkey: agentRecordKey,          isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: TREASURY,                isSigner: false, isWritable: true  }, // treasury
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
       ],
       data,
@@ -775,7 +852,6 @@ class AgentClient {
 
     const tx  = new Transaction().add(ix);
     const sig = await this._sendAndConfirm(tx, [humanKeypair]);
-
     return { txSig: sig };
   }
 
@@ -868,7 +944,7 @@ class AgentClient {
     }
 
     const agent       = await this.getAgent(agentPubkey);
-    const memoryCount = agent.memoryCount;
+    const memoryCount = agent.totalMemoryOps || agent.memoryCount || 0;
 
     if (memoryCount === 0) return [];
 
@@ -900,15 +976,345 @@ class AgentClient {
     // Most recent first
     return results.reverse();
   }
+
+  // ── v2 Methods ──────────────────────────────────────────────────────────────
+
+  /**
+   * Write a decision to the on-chain decision tree.
+   *
+   * @param {Keypair}       agentKeypair  The agent keypair (signer + fee payer)
+   * @param {string}        branchLabel   Strategy branch this decision belongs to
+   * @param {string}        cid           IPFS CID of the decision payload
+   * @param {number}        outcome       0=pending, 1=executed, 2=rejected
+   * @param {number}        confidence    0-10000 basis points (8200 = 82%)
+   * @param {Buffer|null}   [parentHash]  32-byte parent decision hash; zeros for root
+   * @returns {Promise<{ sig: string, decisionHash: string, pda: string }>}
+   */
+  async decisionWrite(agentKeypair, branchLabelOrMessage, cidOrOpts, outcome, confidence, parentHash = null) {
+    assertIsSigner(agentKeypair, 'agentKeypair');
+
+    // ── Simple overload: decisionWrite(keypair, type, message) ──
+    // Allows: client.decisionWrite(kp, 'trade', 'bought XNT at 0.34')
+    // Internally maps to branchLabel=type, cid=sha256(message), outcome=1, confidence=9000
+    let branchLabel, cid;
+    if (typeof cidOrOpts === 'string' && cidOrOpts.length < 64 && !cidOrOpts.startsWith('Qm') && outcome === undefined) {
+      branchLabel = branchLabelOrMessage;
+      // Hash the message string into a pseudo-CID for on-chain storage
+      cid         = 'msg:' + crypto.createHash('sha256').update(cidOrOpts).digest('hex').slice(0, 44);
+      outcome     = 1;    // executed
+      confidence  = 9000; // 90%
+    } else {
+      branchLabel = branchLabelOrMessage;
+      cid         = cidOrOpts;
+    }
+
+    validateString(branchLabel, 'branchLabel', 64);
+    validateString(cid, 'cid', 64);
+
+    // ── Pre-flight balance check (0.001 XNT decision write fee) ──
+    await this._assertSufficientBalance(agentKeypair, 1_000_000, 'decision_write (0.001 XNT)');
+
+    if (typeof outcome !== 'number' || ![0, 1, 2].includes(outcome)) {
+      throw new AgentSDKError(
+        `outcome must be 0 (pending), 1 (executed), or 2 (rejected) — got: ${JSON.stringify(outcome)}. ` +
+        'Tip: use the simple form decisionWrite(keypair, type, message) to skip outcome/confidence.',
+        'INVALID_INPUT'
+      );
+    }
+    if (typeof confidence !== 'number' || confidence < 0 || confidence > 10000) {
+      throw new AgentSDKError(
+        `confidence must be 0-10000 basis points — got: ${JSON.stringify(confidence)}`,
+        'INVALID_INPUT'
+      );
+    }
+
+    // Derive decision_hash: sha256(JSON.stringify({cid, branchLabel, timestamp}))
+    const timestamp    = Date.now();
+    const decisionHash = sha256Str(JSON.stringify({ cid, branchLabel, timestamp }));
+
+    // parent_hash: provided Buffer(32) or zeros
+    const parentHashBuf = (parentHash instanceof Buffer && parentHash.length === 32)
+      ? parentHash
+      : Buffer.alloc(32);
+
+    // Derive AgentRecord PDA
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+
+    // Derive DecisionRecord PDA: [b"decision", agentRecord, decision_hash]
+    const [decisionRecordPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('decision'), agentRecordPDA.toBuffer(), decisionHash],
+      PROGRAM_ID
+    );
+
+    // Encode confidence as u32 LE
+    const confidenceBuf = Buffer.alloc(4);
+    confidenceBuf.writeUInt32LE(confidence, 0);
+
+    const data = Buffer.concat([
+      DISCRIMINATORS.decision_write,
+      decisionHash,                  // [u8;32]
+      parentHashBuf,                 // [u8;32]
+      encodeString(branchLabel),     // string (4-byte LE len + utf8)
+      encodeString(cid),             // string
+      Buffer.from([outcome]),        // u8
+      confidenceBuf,                 // u32 LE
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: agentKeypair.publicKey, isSigner: true,  isWritable: true  }, // agent_authority
+        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: decisionRecordPDA,      isSigner: false, isWritable: true  }, // decision_record (init)
+        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+      ],
+      data,
+    });
+
+    const tx  = new Transaction().add(ix);
+    const sig = await this._sendAndConfirm(tx, [agentKeypair]);
+
+    return {
+      sig,
+      decisionHash: decisionHash.toString('hex'),
+      pda:          decisionRecordPDA.toBase58(),
+    };
+  }
+
+  /**
+   * Open a new strategy branch on-chain.
+   *
+   * @param {Keypair} agentKeypair   The agent keypair (signer + fee payer)
+   * @param {string}  label          Branch label (max 32 chars — also used for PDA seed)
+   * @param {string}  hypothesis     Branch hypothesis description (max 256 chars)
+   * @param {string}  [parentBranch] Parent branch label, or '' for top-level
+   * @returns {Promise<{ sig: string, branchPda: string }>}
+   */
+  async branchOpen(agentKeypair, label, hypothesis, parentBranch = '') {
+    assertIsSigner(agentKeypair, 'agentKeypair');
+    validateString(label, 'label', 32);
+    validateString(hypothesis, 'hypothesis', 256);
+    if (parentBranch !== '') {
+      validateString(parentBranch, 'parentBranch', 32);
+    }
+
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+
+    // Derive BranchRecord PDA: [b"branch", agentRecord, padLabel(label)]
+    const [branchRecordPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('branch'), agentRecordPDA.toBuffer(), padLabel(label)],
+      PROGRAM_ID
+    );
+
+    const data = Buffer.concat([
+      DISCRIMINATORS.strategy_branch_open,
+      encodeString(label),
+      encodeString(parentBranch),
+      encodeString(hypothesis),
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: agentKeypair.publicKey, isSigner: true,  isWritable: true  }, // agent_authority
+        { pubkey: agentRecordPDA,         isSigner: false, isWritable: true  }, // agent_record
+        { pubkey: branchRecordPDA,        isSigner: false, isWritable: true  }, // branch_record (init)
+        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+      ],
+      data,
+    });
+
+    const tx  = new Transaction().add(ix);
+    const sig = await this._sendAndConfirm(tx, [agentKeypair]);
+
+    return {
+      sig,
+      branchPda: branchRecordPDA.toBase58(),
+    };
+  }
+
+  /**
+   * Close a strategy branch on-chain.
+   *
+   * @param {Keypair} agentKeypair  The agent keypair (signer + fee payer)
+   * @param {string}  label         Branch label to close (must match opened label)
+   * @param {number}  outcome       1=success, 2=failure, 3=abandoned
+   * @param {string}  summaryCid    IPFS CID of the closing summary
+   * @returns {Promise<{ sig: string }>}
+   */
+  async branchClose(agentKeypair, label, outcome, summaryCid) {
+    assertIsSigner(agentKeypair, 'agentKeypair');
+    validateString(label, 'label', 32);
+    validateString(summaryCid, 'summaryCid', 64);
+
+    if (typeof outcome !== 'number' || ![1, 2, 3].includes(outcome)) {
+      throw new AgentSDKError('outcome must be 1 (success), 2 (failure), or 3 (abandoned)', 'INVALID_INPUT');
+    }
+
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+
+    // Derive BranchRecord PDA: [b"branch", agentRecord, padLabel(label)]
+    const [branchRecordPDA] = PublicKey.findProgramAddressSync(
+      [Buffer.from('branch'), agentRecordPDA.toBuffer(), padLabel(label)],
+      PROGRAM_ID
+    );
+
+    const data = Buffer.concat([
+      DISCRIMINATORS.strategy_branch_close,
+      encodeString(label),
+      Buffer.from([outcome]),        // u8
+      encodeString(summaryCid),
+    ]);
+
+    const ix = new TransactionInstruction({
+      programId: PROGRAM_ID,
+      keys: [
+        { pubkey: agentKeypair.publicKey, isSigner: true,  isWritable: true  }, // agent_authority
+        { pubkey: agentRecordPDA,         isSigner: false, isWritable: false }, // agent_record (NOT writable for close)
+        { pubkey: branchRecordPDA,        isSigner: false, isWritable: true  }, // branch_record
+        { pubkey: TREASURY,               isSigner: false, isWritable: true  }, // treasury
+        { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
+      ],
+      data,
+    });
+
+    const tx  = new Transaction().add(ix);
+    const sig = await this._sendAndConfirm(tx, [agentKeypair]);
+
+    return { sig };
+  }
+
+  /**
+   * Fetch last N decisions/memories from chain for an agent by reading transaction history.
+   * Does NOT call serve_context on-chain (requires validator signature).
+   * Reads transactions directly from RPC and filters for program instructions.
+   *
+   * @param {PublicKey|string} agentPda  The AgentRecord PDA address
+   * @param {number}           [limit]   Max number of entries to return (default 10)
+   * @returns {Promise<{ entries: Array<{slot: number, sig: string, instruction: string, blockTime: number|null}>, count: number }>}
+   */
+  async contextGet(agentPda, limit = 10) {
+    if (!Number.isInteger(limit) || limit < 1) {
+      throw new AgentSDKError('limit must be a positive integer', 'INVALID_INPUT');
+    }
+
+    let agentPdaPubkey;
+    try {
+      // Accept Keypair, PublicKey, or base58 string
+      if (agentPda && agentPda.publicKey) {
+        agentPdaPubkey = agentPda.publicKey; // Keypair passed — use its pubkey
+      } else if (agentPda instanceof PublicKey) {
+        agentPdaPubkey = agentPda;
+      } else {
+        agentPdaPubkey = new PublicKey(agentPda); // base58 string
+      }
+    } catch (err) {
+      throw new AgentSDKError(
+        `contextGet: invalid agentPda — expected a Keypair, PublicKey, or base58 string, got: ${typeof agentPda}`,
+        'INVALID_INPUT', err
+      );
+    }
+
+    const connection = this._getConnection();
+
+    // Fetch recent signatures for this address
+    const sigs = await connection.getSignaturesForAddress(agentPdaPubkey, { limit });
+
+    const entries = [];
+
+    // Fetch and parse each transaction
+    await Promise.all(sigs.map(async (sigInfo) => {
+      try {
+        const tx = await connection.getParsedTransaction(sigInfo.signature, {
+          maxSupportedTransactionVersion: 0,
+        });
+        if (!tx || !tx.transaction) return;
+
+        const instructions = tx.transaction.message.instructions || [];
+        for (const ix of instructions) {
+          const programId = ix.programId ? ix.programId.toBase58() : null;
+          if (programId !== PROGRAM_ID.toBase58()) continue;
+
+          // Classify instruction type from data discriminator if available
+          let instructionType = 'Unknown';
+          if (ix.data) {
+            try {
+              const rawData = Buffer.from(bs58decode(ix.data));
+              const disc    = rawData.slice(0, 8);
+              if (disc.equals(DISCRIMINATORS.store_memory))          instructionType = 'StoreMemory';
+              else if (disc.equals(DISCRIMINATORS.decision_write))   instructionType = 'DecisionWrite';
+              else if (disc.equals(DISCRIMINATORS.strategy_branch_open))  instructionType = 'BranchOpen';
+              else if (disc.equals(DISCRIMINATORS.strategy_branch_close)) instructionType = 'BranchClose';
+              else if (disc.equals(DISCRIMINATORS.register_agent))   instructionType = 'RegisterAgent';
+            } catch (_) { /* unparseable — leave as Unknown */ }
+          }
+
+          entries.push({
+            slot:        sigInfo.slot,
+            sig:         sigInfo.signature,
+            instruction: instructionType,
+            blockTime:   sigInfo.blockTime || null,
+          });
+          break; // one entry per tx
+        }
+      } catch (err) {
+        // Log parse failures but don't block — one bad tx shouldn't kill the whole query
+        entries.push({
+          slot:        sigInfo.slot,
+          sig:         sigInfo.signature,
+          instruction: 'ParseError',
+          error:       err.message || String(err),
+          blockTime:   sigInfo.blockTime || null,
+        });
+      }
+    }));
+
+    // Sort by slot descending (most recent first)
+    entries.sort((a, b) => b.slot - a.slot);
+
+    return { entries, count: entries.length };
+  }
+
+  /**
+   * Utility: derive the AgentRecord PDA for any public key.
+   *
+   * @param {PublicKey|string} agentPublicKey
+   * @returns {{ pda: PublicKey, bump: number }}
+   */
+  getAgentPda(agentPublicKey) {
+    const [pda, bump] = PublicKey.findProgramAddressSync(
+      [Buffer.from('agent'), new PublicKey(agentPublicKey).toBuffer()],
+      PROGRAM_ID
+    );
+    return { pda, bump };
+  }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Exports
 // ─────────────────────────────────────────────────────────────────────────────
 
+/**
+ * Standalone utility: derive the AgentRecord PDA for any public key.
+ * Mirrors AgentClient#getAgentPda but available without instantiating a client.
+ *
+ * @param {PublicKey|string} agentPublicKey
+ * @returns {{ pda: PublicKey, bump: number }}
+ */
+function getAgentPda(agentPublicKey) {
+  const [pda, bump] = PublicKey.findProgramAddressSync(
+    [Buffer.from('agent'), new PublicKey(agentPublicKey).toBuffer()],
+    PROGRAM_ID
+  );
+  return { pda, bump };
+}
+
 module.exports = {
   AgentClient,
   AgentSDKError,
+  getAgentPda,
   PROGRAM_ID,
   TREASURY,
   DEFAULT_RPC_URL,

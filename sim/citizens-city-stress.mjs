@@ -153,7 +153,7 @@ async function main() {
         await client._sendAndConfirm(fundTx, [humanKeypair]);
         log(`  Funded agent ${agentId}: ${agentKp.publicKey.toBase58().slice(0, 12)}... (0.2 XNT)`);
 
-        // Register agent
+        // Register agent — agentId is now part of PDA seeds
         const { txSig, agentRecordPDA } = await client.register(
           humanKeypair,
           agentKp,
@@ -161,10 +161,11 @@ async function main() {
           'QmSimStart000000000000000000000000000000000000',
           'QmSimManifest0000000000000000000000000000000000'.slice(0, 64)
         );
+        // Store agentId alongside secretKey so we can reconstruct the PDA later
+        state.agentKeys.push(agentKp.secretKey.toString() + '|' + agentId);
         log(`  ✅ Registered ${agentId} | tx: ${txSig.slice(0, 16)}...`);
 
-        state.agentKeys.push(agentKp.secretKey.toString()); // store as comma-joined bytes
-        agentKeypairs.push(agentKp);
+        agentKeypairs.push({ kp: agentKp, agentId });
         saveState();
 
         // Small delay to avoid rate limiting
@@ -175,12 +176,24 @@ async function main() {
       }
     }
     log(`Registration complete: ${agentKeypairs.length}/${CONFIG.numAgents} agents registered`);
+    saveState(); // Save again with updated agentKeys format
   } else {
     // Restore agent keypairs from state
     log(`Restoring ${state.agentKeys.length} agent keypairs from state...`);
-    for (const skStr of state.agentKeys) {
+    for (const entry of state.agentKeys) {
+      // New format: "<secretKey bytes comma-joined>|<agentId>"
+      // Old format: "<secretKey bytes comma-joined>" (no pipe — agentId derived from index)
+      let skStr, agentId;
+      if (entry.includes('|')) {
+        const pipeIdx = entry.lastIndexOf('|');
+        skStr   = entry.slice(0, pipeIdx);
+        agentId = entry.slice(pipeIdx + 1);
+      } else {
+        skStr   = entry;
+        agentId = `CC-Agent-${String(agentKeypairs.length).padStart(3, '0')}`;
+      }
       const skArr = skStr.split(',').map(Number);
-      agentKeypairs.push(Keypair.fromSecretKey(Uint8Array.from(skArr)));
+      agentKeypairs.push({ kp: Keypair.fromSecretKey(Uint8Array.from(skArr)), agentId });
     }
     log(`Restored ${agentKeypairs.length} agents`);
   }
@@ -209,7 +222,7 @@ async function main() {
 
     // Each agent runs a DecisionBuffer round
     // Run agents serially to keep RPC load manageable
-    for (const agentKp of agentKeypairs) {
+    for (const { kp: agentKp, agentId: agentIdLocal } of agentKeypairs) {
       if (!running) break;
 
       const agentClient = new AgentClient({ rpcUrl: CONFIG.rpcUrl, wallet: agentKp });
@@ -228,7 +241,7 @@ async function main() {
       // Write in explicit batches using DecisionBuffer._sendBatch directly
       // This bypasses the async auto-flush race and gives us full control
       const { DecisionBuffer: DB } = require('../src/decision-buffer.js');
-      const buffer = new DB(agentClient, agentKp, { maxBatch: 9999 }); // no auto-flush
+      const buffer = new DB(agentClient, agentKp, { maxBatch: 9999, agentId: agentIdLocal }); // no auto-flush
 
       for (const d of decisions) {
         buffer.add(d.branch, d.message);

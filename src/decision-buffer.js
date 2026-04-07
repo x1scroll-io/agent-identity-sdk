@@ -58,6 +58,7 @@ class DecisionBuffer {
    * @param {import('./index').AgentClient} client       - Configured AgentClient
    * @param {import('@solana/web3.js').Keypair} keypair  - Agent keypair (signer)
    * @param {object} [opts]
+   * @param {string} [opts.agentId]           - Agent identifier (required for new PDA seeds)
    * @param {number} [opts.maxBatch=5]        - Max decisions per tx (1–5)
    * @param {number} [opts.flushIntervalMs]   - Auto-flush interval in ms (optional)
    * @param {function} [opts.onFlush]         - Callback: (results) => void on each flush
@@ -66,6 +67,7 @@ class DecisionBuffer {
   constructor(client, keypair, opts = {}) {
     this._client   = client;
     this._keypair  = keypair;
+    this._agentId  = opts.agentId || null;
     this._maxBatch = Math.min(Math.max(opts.maxBatch || MAX_BATCH_SIZE, 1), MAX_BATCH_SIZE);
     this._onFlush  = opts.onFlush  || null;
     this._onError  = opts.onError  || null;
@@ -249,8 +251,12 @@ class DecisionBuffer {
     const TREASURY = require('./index').TREASURY;
 
     // Derive AgentRecord PDA once — shared across all instructions in the batch
+    // agentId is required with new seeds: [b"agent", authority, agent_id]
+    if (!this._agentId) {
+      throw new Error('DecisionBuffer: agentId is required. Pass it as opts.agentId in the constructor.');
+    }
     const { pda: agentRecordPDA } = this._client.constructor.deriveAgentRecord
-      ? this._client.constructor.deriveAgentRecord(agentKey)
+      ? this._client.constructor.deriveAgentRecord(agentKey, this._agentId)
       : (() => { throw new Error('Cannot derive AgentRecord PDA'); })();
 
     const tx = new Transaction();

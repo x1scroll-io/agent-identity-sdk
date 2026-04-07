@@ -536,18 +536,19 @@ class AgentClient {
   // ── Static PDA Helpers ──────────────────────────────────────────────────────
 
   /**
-   * Derive the AgentRecord PDA for a given agent public key.
-   * Seeds: [b"agent", agentPubkey]
+   * Derive the AgentRecord PDA for a given human wallet and agent ID.
+   * Seeds: [b"agent", humanPubkey, agentId]
    *
-   * @param {PublicKey|string} agentPubkey
+   * @param {PublicKey|string} humanPubkey   The human authority wallet (payer/owner)
+   * @param {string}           agentId       Agent identifier string (max 32 chars)
    * @param {PublicKey|string} [programId]
    * @returns {{ pda: PublicKey, bump: number }}
    */
-  static deriveAgentRecord(agentPubkey, programId = PROGRAM_ID) {
-    const agentKey = new PublicKey(agentPubkey);
+  static deriveAgentRecord(humanPubkey, agentId, programId = PROGRAM_ID) {
+    const humanKey = new PublicKey(humanPubkey);
     const progKey  = new PublicKey(programId);
     const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), agentKey.toBuffer()],
+      [Buffer.from('agent'), humanKey.toBuffer(), Buffer.from(agentId)],
       progKey
     );
     return { pda, bump };
@@ -603,8 +604,8 @@ class AgentClient {
     // Human pays: 0.05 XNT fee + rent (~0.012 XNT)
     await this._assertSufficientBalance(humanKeypair, 65_000_000, 'register_agent (0.05 XNT fee + rent)');
 
-    // PDA derived from human authority key — matches program: seeds=[b"agent", agent_authority.key()]
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(humanKeypair.publicKey);
+    // PDA derived from human authority key + agentId — matches program: seeds=[b"agent", agent_authority.key(), agent_id]
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(humanKeypair.publicKey, agentId);
 
     const data = Buffer.concat([
       DISCRIMINATORS.register_agent,
@@ -649,12 +650,13 @@ class AgentClient {
    * @param {boolean}  [encrypted=false]   Whether the IPFS content is encrypted
    * @returns {Promise<{ txSig: string, memoryEntryPDA: string }>}
    */
-  async storeMemory(agentKeypair, newMemoryCid) {
-    // v3: agent signs, PDA seeded by agent pubkey
+  async storeMemory(agentKeypair, newMemoryCid, agentId) {
+    // v3: agent signs, PDA seeded by agent pubkey + agentId
     assertIsSigner(agentKeypair, 'agentKeypair');
     validateString(newMemoryCid, 'newMemoryCid', 64);
+    validateString(agentId, 'agentId', 32);
 
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey, agentId);
 
     const data = Buffer.concat([
       DISCRIMINATORS.store_memory,
@@ -787,12 +789,13 @@ class AgentClient {
    * @param {string}         metadataUri   New metadata URI (max 128 chars)
    * @returns {Promise<{ txSig: string }>}
    */
-  async updateAgent(agentKeypair, newManifestCid) {
+  async updateAgent(agentKeypair, newManifestCid, agentId) {
     // v3: agent signs update_manifest
     assertIsSigner(agentKeypair, 'agentKeypair');
     validateString(newManifestCid, 'newManifestCid', 64);
+    validateString(agentId, 'agentId', 32);
 
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey, agentId);
 
     const data = Buffer.concat([
       DISCRIMINATORS.update_agent,  // sha256("global:update_manifest")[0..8]
@@ -873,15 +876,15 @@ class AgentClient {
    *   bump: number
    * }>}
    */
-  async getAgent(agentPubkey) {
-    const agentKey           = new PublicKey(agentPubkey);
-    const { pda }            = AgentClient.deriveAgentRecord(agentKey);
+  async getAgent(humanPubkey, agentId) {
+    const agentKey           = new PublicKey(humanPubkey);
+    const { pda }            = AgentClient.deriveAgentRecord(agentKey, agentId);
     const connection         = this._getConnection();
     const info               = await connection.getAccountInfo(pda);
 
     if (!info || !info.data) {
       throw new AgentSDKError(
-        `No AgentRecord found for ${agentPubkey}. Has this agent been registered?`,
+        `No AgentRecord found for human=${humanPubkey}, agentId=${agentId}. Has this agent been registered?`,
         'NOT_FOUND'
       );
     }
@@ -990,7 +993,7 @@ class AgentClient {
    * @param {Buffer|null}   [parentHash]  32-byte parent decision hash; zeros for root
    * @returns {Promise<{ sig: string, decisionHash: string, pda: string }>}
    */
-  async decisionWrite(agentKeypair, branchLabelOrMessage, cidOrOpts, outcome, confidence, parentHash = null) {
+  async decisionWrite(agentKeypair, branchLabelOrMessage, cidOrOpts, outcome, confidence, parentHash = null, agentId = null) {
     assertIsSigner(agentKeypair, 'agentKeypair');
 
     // ── Simple overload: decisionWrite(keypair, type, message) ──
@@ -1037,8 +1040,11 @@ class AgentClient {
       ? parentHash
       : Buffer.alloc(32);
 
-    // Derive AgentRecord PDA
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    // Derive AgentRecord PDA — agentId required when provided (new seeds: [b"agent", authority, agent_id])
+    if (agentId !== null) validateString(agentId, 'agentId', 32);
+    const { pda: agentRecordPDA } = agentId !== null
+      ? AgentClient.deriveAgentRecord(agentKeypair.publicKey, agentId)
+      : (() => { throw new AgentSDKError('agentId is required for decisionWrite — pass as 7th argument', 'MISSING_AGENT_ID'); })();
 
     // Derive DecisionRecord PDA: [b"decision", agentRecord, decision_hash]
     const [decisionRecordPDA] = PublicKey.findProgramAddressSync(
@@ -1091,15 +1097,17 @@ class AgentClient {
    * @param {string}  [parentBranch] Parent branch label, or '' for top-level
    * @returns {Promise<{ sig: string, branchPda: string }>}
    */
-  async branchOpen(agentKeypair, label, hypothesis, parentBranch = '') {
+  async branchOpen(agentKeypair, label, hypothesis, parentBranch = '', agentId = null) {
     assertIsSigner(agentKeypair, 'agentKeypair');
     validateString(label, 'label', 32);
     validateString(hypothesis, 'hypothesis', 256);
     if (parentBranch !== '') {
       validateString(parentBranch, 'parentBranch', 32);
     }
-
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    if (agentId !== null) validateString(agentId, 'agentId', 32);
+    const { pda: agentRecordPDA } = agentId !== null
+      ? AgentClient.deriveAgentRecord(agentKeypair.publicKey, agentId)
+      : (() => { throw new AgentSDKError('agentId is required for branchOpen', 'MISSING_AGENT_ID'); })();
 
     // Derive BranchRecord PDA: [b"branch", agentRecord, padLabel(label)]
     const [branchRecordPDA] = PublicKey.findProgramAddressSync(
@@ -1144,7 +1152,7 @@ class AgentClient {
    * @param {string}  summaryCid    IPFS CID of the closing summary
    * @returns {Promise<{ sig: string }>}
    */
-  async branchClose(agentKeypair, label, outcome, summaryCid) {
+  async branchClose(agentKeypair, label, outcome, summaryCid, agentId = null) {
     assertIsSigner(agentKeypair, 'agentKeypair');
     validateString(label, 'label', 32);
     validateString(summaryCid, 'summaryCid', 64);
@@ -1152,8 +1160,10 @@ class AgentClient {
     if (typeof outcome !== 'number' || ![1, 2, 3].includes(outcome)) {
       throw new AgentSDKError('outcome must be 1 (success), 2 (failure), or 3 (abandoned)', 'INVALID_INPUT');
     }
-
-    const { pda: agentRecordPDA } = AgentClient.deriveAgentRecord(agentKeypair.publicKey);
+    if (agentId !== null) validateString(agentId, 'agentId', 32);
+    const { pda: agentRecordPDA } = agentId !== null
+      ? AgentClient.deriveAgentRecord(agentKeypair.publicKey, agentId)
+      : (() => { throw new AgentSDKError('agentId is required for branchClose', 'MISSING_AGENT_ID'); })();
 
     // Derive BranchRecord PDA: [b"branch", agentRecord, padLabel(label)]
     const [branchRecordPDA] = PublicKey.findProgramAddressSync(
@@ -1283,12 +1293,8 @@ class AgentClient {
    * @param {PublicKey|string} agentPublicKey
    * @returns {{ pda: PublicKey, bump: number }}
    */
-  getAgentPda(agentPublicKey) {
-    const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), new PublicKey(agentPublicKey).toBuffer()],
-      PROGRAM_ID
-    );
-    return { pda, bump };
+  getAgentPda(humanPublicKey, agentId) {
+    return AgentClient.deriveAgentRecord(humanPublicKey, agentId);
   }
 }
 
@@ -1669,9 +1675,9 @@ class PinningRegistryClient {
  * @param {PublicKey|string} agentPublicKey
  * @returns {{ pda: PublicKey, bump: number }}
  */
-function getAgentPda(agentPublicKey) {
+function getAgentPda(humanPublicKey, agentId) {
   const [pda, bump] = PublicKey.findProgramAddressSync(
-    [Buffer.from('agent'), new PublicKey(agentPublicKey).toBuffer()],
+    [Buffer.from('agent'), new PublicKey(humanPublicKey).toBuffer(), Buffer.from(agentId)],
     PROGRAM_ID
   );
   return { pda, bump };

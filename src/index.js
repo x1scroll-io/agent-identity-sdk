@@ -1324,10 +1324,20 @@ class PinningRegistryClient {
   /**
    * @param {string} [rpcUrl] - X1 RPC endpoint (default: GorillaServers)
    */
-  constructor(rpcUrl = DEFAULT_RPC_URL) {
-    this.connection = new Connection(rpcUrl, 'confirmed');
-    this.programId  = PINNING_REGISTRY_PROGRAM_ID;
-    this.treasury   = TREASURY;
+  /**
+   * @param {string} [rpcUrl]      - X1 RPC endpoint (default: GorillaServers)
+   * @param {number} [cacheTtlMs]  - Validator cache TTL in ms (default: 24h)
+   */
+  constructor(rpcUrl = DEFAULT_RPC_URL, cacheTtlMs = 24 * 60 * 60 * 1000) {
+    this.connection  = new Connection(rpcUrl, 'confirmed');
+    this.programId   = PINNING_REGISTRY_PROGRAM_ID;
+    this.treasury    = TREASURY;
+    this.cacheTtlMs  = cacheTtlMs;
+
+    // Validator discovery cache
+    this._validatorCache     = [];   // [{ authority, endpoint, status, totalPinsServed, totalFeesEarned }]
+    this._cacheLastSyncedAt  = 0;    // unix ms
+    this._rotationIndex      = 0;    // round-robin cursor
   }
 
   // ── PDA derivation ──────────────────────────────────────────────────────────
@@ -1504,6 +1514,122 @@ class PinningRegistryClient {
       data,
     });
     return this._sendTx(ix, [agentKeypair, validatorKeypair]);
+  }
+
+  // ── Validator Discovery (v1.6.0) ─────────────────────────────────────────────
+
+  /**
+   * Scan all ValidatorRecord PDAs on-chain and refresh the local cache.
+   * Called automatically by getNextActiveValidator() when cache is stale.
+   * Safe to call manually to force a refresh.
+   *
+   * ValidatorRecord layout (Anchor):
+   *   8  discriminator
+   *   32 authority (pubkey)
+   *   4  endpoint_len + N endpoint (borsh string)
+   *   1  status (0=Active, 1=Suspended, 2=Ejected)
+   *   1  consecutive_misses
+   *   8  total_pins_served (u64 LE)
+   *   8  total_fees_earned (u64 LE)
+   *   1  bump
+   *
+   * @returns {Array<{authority:string, endpoint:string, status:string, totalPinsServed:number, totalFeesEarned:number}>}
+   */
+  async syncValidators() {
+    // ValidatorRecord discriminator: [105, 248, 112, 34, 71, 224, 21, 71]
+    const VALIDATOR_RECORD_DISCRIMINATOR = Buffer.from([105, 248, 112, 34, 71, 224, 21, 71]);
+
+    const accounts = await this.connection.getProgramAccounts(this.programId, {
+      commitment: 'confirmed',
+      filters: [
+        { memcmp: { offset: 0, bytes: bs58encode(VALIDATOR_RECORD_DISCRIMINATOR) } },
+      ],
+    });
+
+    const STATUS_MAP = { 0: 'Active', 1: 'Suspended', 2: 'Ejected' };
+
+    const parsed = [];
+    for (const { account } of accounts) {
+      try {
+        const d = account.data;
+        // authority: bytes 8..40
+        const authority = new PublicKey(d.slice(8, 40)).toBase58();
+        // endpoint: u32 length at 40, then string bytes
+        const epLen     = d.readUInt32LE(40);
+        const endpoint  = d.slice(44, 44 + epLen).toString('utf8');
+        const off       = 44 + epLen;
+        // status: 1 byte
+        const statusByte = d[off];
+        const status     = STATUS_MAP[statusByte] ?? 'Unknown';
+        // consecutive_misses: 1 byte
+        // total_pins_served: u64 LE at off+2
+        const totalPinsServed  = Number(d.readBigUInt64LE(off + 2));
+        // total_fees_earned: u64 LE at off+10
+        const totalFeesEarned  = Number(d.readBigUInt64LE(off + 10));
+
+        parsed.push({ authority, endpoint, status, totalPinsServed, totalFeesEarned });
+      } catch (_) {
+        // skip malformed accounts
+      }
+    }
+
+    // Cache only Active validators
+    this._validatorCache    = parsed.filter(v => v.status === 'Active');
+    this._cacheLastSyncedAt = Date.now();
+
+    return parsed; // return all (including suspended/ejected) for observability
+  }
+
+  /**
+   * Returns the next active validator in round-robin order.
+   * Auto-syncs from chain if cache is empty or older than cacheTtlMs (default 24h).
+   *
+   * @param {boolean} [forceSync=false] - Force on-chain sync even if cache is fresh
+   * @returns {{ authority: string, endpoint: string, totalPinsServed: number, totalFeesEarned: number }}
+   * @throws {Error} if no active validators are registered
+   */
+  async getNextActiveValidator(forceSync = false) {
+    const cacheAge = Date.now() - this._cacheLastSyncedAt;
+    const cacheStale = cacheAge > this.cacheTtlMs;
+
+    if (forceSync || cacheStale || this._validatorCache.length === 0) {
+      await this.syncValidators();
+    }
+
+    if (this._validatorCache.length === 0) {
+      throw new Error('No active validators registered in the Pinning Registry');
+    }
+
+    // Round-robin — cursor wraps automatically
+    const validator = this._validatorCache[this._rotationIndex % this._validatorCache.length];
+    this._rotationIndex++;
+
+    return validator;
+  }
+
+  /**
+   * Returns a snapshot of the current local validator cache without hitting RPC.
+   * Call syncValidators() first if you need fresh data.
+   *
+   * @returns {Array<{authority:string, endpoint:string, status:string, totalPinsServed:number, totalFeesEarned:number}>}
+   */
+  getCachedValidators() {
+    return [...this._validatorCache];
+  }
+
+  /**
+   * Returns cache metadata.
+   *
+   * @returns {{ count: number, lastSyncedAt: number, ageMs: number, stale: boolean }}
+   */
+  getCacheStatus() {
+    const ageMs = Date.now() - this._cacheLastSyncedAt;
+    return {
+      count:        this._validatorCache.length,
+      lastSyncedAt: this._cacheLastSyncedAt,
+      ageMs,
+      stale: ageMs > this.cacheTtlMs,
+    };
   }
 
   /**

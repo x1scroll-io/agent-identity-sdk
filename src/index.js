@@ -615,8 +615,7 @@ class AgentClient {
     const ix = new TransactionInstruction({
       programId: PROGRAM_ID,
       keys: [
-        { pubkey: humanKeypair.publicKey,  isSigner: true,  isWritable: true  }, // human (payer/owner)
-        { pubkey: agentKeypair.publicKey,  isSigner: true,  isWritable: false }, // agent_identity (co-sign)
+        { pubkey: humanKeypair.publicKey,  isSigner: true,  isWritable: true  }, // agent_authority (payer)
         { pubkey: agentRecordPDA,          isSigner: false, isWritable: true  }, // agent_record (init)
         { pubkey: TREASURY,                isSigner: false, isWritable: true  }, // treasury
         { pubkey: SystemProgram.programId, isSigner: false, isWritable: false }, // system_program
@@ -625,7 +624,7 @@ class AgentClient {
     });
 
     const tx  = new Transaction().add(ix);
-    const sig = await this._sendAndConfirm(tx, [humanKeypair, agentKeypair]);
+    const sig = await this._sendAndConfirm(tx, [humanKeypair]);
 
     return {
       txSig:          sig,

@@ -1677,9 +1677,12 @@ function getAgentPda(agentPublicKey) {
   return { pda, bump };
 }
 
+const { DecisionBuffer, MAX_BATCH_SIZE } = require('./decision-buffer');
+
 module.exports = {
   AgentClient,
   PinningRegistryClient,
+  DecisionBuffer,
   AgentSDKError,
   getAgentPda,
   PROGRAM_ID,
@@ -1687,4 +1690,5 @@ module.exports = {
   TREASURY,
   DEFAULT_RPC_URL,
   DEFAULT_PIN_FEE_LAMPORTS,
+  MAX_BATCH_SIZE,
 };

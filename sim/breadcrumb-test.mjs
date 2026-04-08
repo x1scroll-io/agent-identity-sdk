@@ -17,7 +17,7 @@ const require = createRequire(import.meta.url);
 
 const { AgentClient } = require('../src/index.js');
 const { Keypair, Connection } = require('@solana/web3.js');
-const fs   = require('fs');
+const fs    = require('fs');
 const https = require('https');
 const http  = require('http');
 
@@ -25,7 +25,8 @@ const RPC_URL   = process.env.RPC_URL   || 'https://rpc.x1scroll.io';
 const API_KEY   = process.env.RPC_API_KEY || null;
 const IPFS_URL  = process.env.IPFS_URL  || 'https://x1scroll.io/api/ipfs/upload';
 const IPFS_RECALL_URL = 'https://x1scroll.io/api/ipfs';
-const STATE_FILE = process.env.STATE_FILE || './sim_state.json';
+const STATE_FILE   = process.env.STATE_FILE   || './sim_state.json';
+const HUMAN_WALLET = process.env.HUMAN_WALLET || null;
 const LOG_FILE   = process.env.LOG_FILE   || './breadcrumb_test.log';
 const NUM_ROUNDS = parseInt(process.env.NUM_ROUNDS || '3');
 const NUM_AGENTS = parseInt(process.env.NUM_AGENTS || '10');
@@ -35,6 +36,65 @@ function log(msg) {
   const line = `[${new Date().toISOString()}] ${msg}`;
   console.log(line);
   logStream.write(line + '\n');
+}
+
+// ── bs58 compat ───────────────────────────────────────────────────────────────
+const bs58mod = require('bs58');
+const bs58decode = (typeof bs58mod.decode === 'function') ? bs58mod.decode : bs58mod.default.decode;
+
+function loadKeypair(filePath) {
+  const raw = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+  if (raw.secret_b58) return Keypair.fromSecretKey(bs58decode(raw.secret_b58));
+  const arr = Array.isArray(raw) ? raw : (raw.secretKey || Object.values(raw));
+  return Keypair.fromSecretKey(Uint8Array.from(arr));
+}
+
+// ── Bootstrap: register agents from scratch ──────────────────────────────────
+async function bootstrapAgents(n) {
+  if (!HUMAN_WALLET) {
+    log('ERROR: No state file found and HUMAN_WALLET not set.');
+    log('  Set HUMAN_WALLET=<path/to/wallet.json> and ensure it is funded (≥1 XNT per 5 agents).');
+    process.exit(1);
+  }
+  const humanKp = loadKeypair(HUMAN_WALLET);
+  log(`Bootstrapping ${n} agents from wallet ${humanKp.publicKey.toBase58().slice(0, 16)}...`);
+
+  const { Transaction, SystemProgram } = require('@solana/web3.js');
+  const humanClient = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: humanKp });
+  const conn = new Connection(RPC_URL, 'confirmed');
+  const bal = await conn.getBalance(humanKp.publicKey);
+  log(`  Wallet balance: ${(bal / 1e9).toFixed(4)} XNT`);
+
+  const agentKeys = [];
+  for (let i = 0; i < n; i++) {
+    const agentKp = Keypair.generate();
+    const agentId = `CC-Agent-${i.toString().padStart(3, '0')}`;
+    try {
+      const fundTx = new Transaction().add(SystemProgram.transfer({
+        fromPubkey: humanKp.publicKey,
+        toPubkey: agentKp.publicKey,
+        lamports: 200_000_000,
+      }));
+      await humanClient._sendAndConfirm(fundTx, [humanKp]);
+
+      const genesisCid  = await pinToIPFS({ agentId, event: 'genesis', ts: new Date().toISOString() });
+      const manifestCid = await pinToIPFS({ agentId, event: 'manifest', version: '1.0', ts: new Date().toISOString() });
+
+      const agentRegClient = new AgentClient({ rpcUrl: RPC_URL, wallet: agentKp });
+      await agentRegClient.register(agentKp, agentId, genesisCid, manifestCid.slice(0, 64));
+
+      agentKeys.push(agentKp.secretKey.toString() + '|' + agentId);
+      log(`  ✅ Registered ${agentId}`);
+      await new Promise(r => setTimeout(r, 800));
+    } catch(e) {
+      log(`  ❌ Failed to register ${agentId}: ${e.message}`);
+    }
+  }
+
+  const state = { startedAt: new Date().toISOString(), round: 0, totalDecisions: 0, agentKeys, errors: 0 };
+  fs.writeFileSync(STATE_FILE, JSON.stringify(state, null, 2));
+  log(`Bootstrap complete: ${agentKeys.length}/${n} agents registered, state saved to ${STATE_FILE}`);
+  return state;
 }
 
 // ── Load agent keypairs from state ──────────────────────────────────────────
@@ -110,6 +170,11 @@ function recallFromIPFS(cid, retries = 3) {
 async function main() {
   log('=== BREADCRUMB TEST — Real IPFS + On-Chain Decision Chain ===');
   log(`Testing ${NUM_AGENTS} agents × ${NUM_ROUNDS} rounds`);
+
+  if (!fs.existsSync(STATE_FILE)) {
+    log(`No state file found at ${STATE_FILE} — running bootstrap registration first...`);
+    await bootstrapAgents(NUM_AGENTS);
+  }
 
   const agents = loadAgentKeypairs(NUM_AGENTS);
   log(`Loaded ${agents.length} agent keypairs from state`);

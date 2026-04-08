@@ -1,0 +1,59 @@
+name: A2A Protocol — Outside-In Test
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: '0 6 * * *'   # 6am UTC daily
+  workflow_dispatch:       # manual trigger
+
+jobs:
+  a2a-sim:
+    name: Agent-to-Agent Protocol Verification
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Write Alpha wallet (funded agent)
+        env:
+          ALPHA_SECRET_B58: ${{ secrets.ALPHA_SECRET_B58 }}
+        run: |
+          node -e "
+          const bs58 = require('bs58');
+          const fs   = require('fs');
+          const dec  = typeof bs58.decode === 'function' ? bs58.decode : bs58.default.decode;
+          fs.writeFileSync('./alpha_wallet.json', JSON.stringify({ secret_b58: process.env.ALPHA_SECRET_B58 }));
+          console.log('Alpha wallet ready');
+          "
+
+      - name: Run A2A outside-in sim
+        env:
+          RPC_URL: ${{ secrets.RPC_URL || 'http://104.250.159.138:8899' }}
+          HUMAN_WALLET: ./alpha_wallet.json
+          LOG_FILE: ./sim-a2a.log
+          STATE_FILE: ./sim-a2a-state.json
+        run: node sim/sim-a2a.mjs
+
+      - name: Upload sim log
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sim-a2a-log
+          path: |
+            sim-a2a.log
+            sim-a2a-state.json
+          retention-days: 7

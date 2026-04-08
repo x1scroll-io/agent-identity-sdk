@@ -17,8 +17,10 @@ const require = createRequire(import.meta.url);
 
 const { AgentClient, DecisionBuffer } = require('../src/index.js');
 const { Keypair, Connection }          = require('@solana/web3.js');
-const fs   = require('fs');
-const path = require('path');
+const fs    = require('fs');
+const path  = require('path');
+const https = require('https');
+const http  = require('http');
 
 // ── Config ────────────────────────────────────────────────────────────────────
 const CONFIG = {
@@ -32,6 +34,45 @@ const CONFIG = {
   logFile:       process.env.LOG_FILE   || './citizens_city_sim.log',
   stateFile:     process.env.STATE_FILE || './citizens_city_sim_state.json',
 };
+
+// ── IPFS helpers ─────────────────────────────────────────────────────────────
+const IPFS_URL    = process.env.IPFS_URL   || 'https://x1scroll.io/api/ipfs/upload';
+const RPC_API_KEY = process.env.RPC_API_KEY || '';
+
+async function pinToIPFS(content, attempt = 1) {
+  return new Promise((resolve, reject) => {
+    const body = JSON.stringify({ content });
+    const url  = new URL(IPFS_URL);
+    const mod  = url.protocol === 'https:' ? https : http;
+    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) };
+    if (RPC_API_KEY) headers['x-api-key'] = RPC_API_KEY;
+    const req = mod.request({
+      hostname: url.hostname,
+      port: url.port || (url.protocol === 'https:' ? 443 : 80),
+      path: url.pathname, method: 'POST', headers, timeout: 15000,
+    }, (res) => {
+      let data = '';
+      res.on('data', d => data += d);
+      res.on('end', async () => {
+        if (res.statusCode === 429 && attempt <= 3) {
+          const delay = [0, 1000, 2000, 4000][attempt];
+          await new Promise(r => setTimeout(r, delay));
+          resolve(pinToIPFS(content, attempt + 1));
+          return;
+        }
+        try {
+          const parsed = JSON.parse(data);
+          if (parsed.cid) resolve(parsed.cid);
+          else reject(new Error(`IPFS no CID: ${data}`));
+        } catch(e) { reject(new Error(`IPFS parse error: ${data}`)); }
+      });
+    });
+    req.on('error', reject);
+    req.on('timeout', () => { req.destroy(); reject(new Error('IPFS timeout')); });
+    req.write(body);
+    req.end();
+  });
+}
 
 // ── Logging ───────────────────────────────────────────────────────────────────
 const logStream = fs.createWriteStream(CONFIG.logFile, { flags: 'a' });
@@ -155,11 +196,14 @@ async function main() {
 
         // Register agent — each agent registers as its OWN authority (unique PDA per agent)
         const agentRegClient = new AgentClient({ rpcUrl: CONFIG.rpcUrl, wallet: agentKp });
+        // Pin a real genesis payload to IPFS so the CIDs are authentic
+        const genesisCid  = await pinToIPFS({ agentId, event: 'genesis', ts: new Date().toISOString() });
+        const manifestCid = await pinToIPFS({ agentId, event: 'manifest', version: '1.0', ts: new Date().toISOString() });
         const { txSig, agentRecordPDA } = await agentRegClient.register(
           agentKp,
           agentId,
-          'QmSimStart000000000000000000000000000000000000',
-          'QmSimManifest0000000000000000000000000000000000'.slice(0, 64)
+          genesisCid,
+          manifestCid.slice(0, 64)
         );
         // Store agentId alongside secretKey so we can reconstruct the PDA later
         state.agentKeys.push(agentKp.secretKey.toString() + '|' + agentId);

@@ -21,12 +21,14 @@ const fs   = require('fs');
 const https = require('https');
 const http  = require('http');
 
-const RPC_URL   = process.env.RPC_URL   || 'http://104.250.159.138:8899';
+const RPC_URL   = process.env.RPC_URL   || 'https://rpc.x1scroll.io';
+const API_KEY   = process.env.RPC_API_KEY || null;
 const IPFS_URL  = process.env.IPFS_URL  || 'https://x1scroll.io/api/ipfs/upload';
-const STATE_FILE = process.env.STATE_FILE || '/root/.openclaw/workspace/memory/citizens_city_sim_state.json';
-const LOG_FILE   = process.env.LOG_FILE   || '/root/.openclaw/workspace/memory/breadcrumb_test.log';
+const IPFS_RECALL_URL = 'https://x1scroll.io/api/ipfs';
+const STATE_FILE = process.env.STATE_FILE || './sim_state.json';
+const LOG_FILE   = process.env.LOG_FILE   || './breadcrumb_test.log';
 const NUM_ROUNDS = parseInt(process.env.NUM_ROUNDS || '3');
-const NUM_AGENTS = parseInt(process.env.NUM_AGENTS || '10'); // test first 10
+const NUM_AGENTS = parseInt(process.env.NUM_AGENTS || '10');
 
 const logStream = fs.createWriteStream(LOG_FILE, { flags: 'a' });
 function log(msg) {
@@ -45,22 +47,29 @@ function loadAgentKeypairs(n) {
   });
 }
 
-// ── Pin content to IPFS ──────────────────────────────────────────────────────
-function pinToIPFS(content) {
-  return new Promise((resolve, reject) => {
+// ── Pin content to IPFS (with retry on 429) ──────────────────────────────────
+function pinToIPFS(content, retries = 3) {
+  const attempt = (i) => new Promise((resolve, reject) => {
     const body = JSON.stringify({ content });
     const url = new URL(IPFS_URL);
     const mod = url.protocol === 'https:' ? https : http;
+    const headers = { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) };
+    if (API_KEY) headers['x-api-key'] = API_KEY;
     const req = mod.request({
       hostname: url.hostname,
       port: url.port || (url.protocol === 'https:' ? 443 : 80),
       path: url.pathname,
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+      headers,
+      timeout: 15000,
     }, (res) => {
       let data = '';
       res.on('data', d => data += d);
       res.on('end', () => {
+        if (res.statusCode === 429 && i < retries - 1) {
+          setTimeout(() => attempt(i + 1).then(resolve).catch(reject), (i + 1) * 2000);
+          return;
+        }
         try {
           const parsed = JSON.parse(data);
           if (parsed.cid) resolve(parsed.cid);
@@ -74,17 +83,27 @@ function pinToIPFS(content) {
   });
 }
 
-// ── Recall from IPFS ─────────────────────────────────────────────────────────
-function recallFromIPFS(cid) {
-  return new Promise((resolve, reject) => {
-    const url = `https://x1scroll.io/api/ipfs/${cid}`;
-    const parsed = new URL(url);
-    https.get({ hostname: parsed.hostname, path: parsed.pathname, timeout: 8000 }, (res) => {
+// ── Recall from IPFS (with retry on 429) ─────────────────────────────────────
+function recallFromIPFS(cid, retries = 3) {
+  const attempt = (i) => new Promise((resolve, reject) => {
+    const url = new URL(`${IPFS_RECALL_URL}/${cid}`);
+    const headers = {};
+    if (API_KEY) headers['x-api-key'] = API_KEY;
+    const req = https.request({ hostname: url.hostname, path: url.pathname, headers, timeout: 10000 }, (res) => {
       let data = '';
       res.on('data', d => data += d);
-      res.on('end', () => resolve(data));
-    }).on('error', reject);
+      res.on('end', () => {
+        if (res.statusCode === 429 && i < retries - 1) {
+          setTimeout(() => attempt(i + 1).then(resolve).catch(reject), (i + 1) * 2000);
+          return;
+        }
+        resolve(data);
+      });
+    });
+    req.on('error', reject);
+    req.end();
   });
+  return attempt(0);
 }
 
 // ── Main ─────────────────────────────────────────────────────────────────────

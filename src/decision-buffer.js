@@ -256,7 +256,7 @@ class DecisionBuffer {
       throw new Error('DecisionBuffer: agentId is required. Pass it as opts.agentId in the constructor.');
     }
     const { pda: agentRecordPDA } = this._client.constructor.deriveAgentRecord
-      ? this._client.constructor.deriveAgentRecord(agentKey, this._agentId)
+      ? this._client.constructor.deriveAgentRecord(agentKey)
       : (() => { throw new Error('Cannot derive AgentRecord PDA'); })();
 
     const tx = new Transaction();
@@ -281,14 +281,21 @@ class DecisionBuffer {
       const confidenceBuf = Buffer.alloc(4);
       confidenceBuf.writeUInt32LE(item.confidence, 0);
 
+      // Encode fixed [u8;64] arrays — no length prefix, null-padded (zero heap in BPF)
+      const encodeFixed64 = (s) => {
+        const buf = Buffer.alloc(64, 0);
+        Buffer.from(s || '', 'utf8').copy(buf, 0, 0, 64);
+        return buf;
+      };
+
       const data = Buffer.concat([
         DECISION_WRITE_DISC,
-        decisionHash,
-        parentHashBuf,
-        encodeString(item.branchLabel),
-        encodeString(item.cid),
-        Buffer.from([item.outcome]),
-        confidenceBuf,
+        encodeFixed64(item.branchLabel), // branch_label: [u8;64]
+        encodeFixed64(item.cid),         // cid: [u8;64]
+        decisionHash,                    // decision_hash: [u8;32]
+        parentHashBuf,                   // parent_hash: [u8;32]
+        Buffer.from([item.outcome]),     // outcome: u8
+        confidenceBuf,                   // confidence: u32 LE
       ]);
 
       tx.add(new TransactionInstruction({

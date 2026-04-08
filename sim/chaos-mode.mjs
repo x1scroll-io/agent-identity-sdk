@@ -20,7 +20,8 @@ const fs    = require('fs');
 const https = require('https');
 const http  = require('http');
 
-const RPC_URL    = process.env.RPC_URL    || 'http://104.250.159.138:8899';
+const RPC_URL    = process.env.RPC_URL    || 'https://rpc.x1scroll.io';
+const API_KEY    = process.env.RPC_API_KEY || null;
 const IPFS_UPLOAD = 'https://x1scroll.io/api/ipfs/upload';
 const IPFS_RECALL = 'https://x1scroll.io/api/ipfs';
 const STATE_FILE  = process.env.STATE_FILE || '/root/.openclaw/workspace/memory/citizens_city_sim_state.json';
@@ -57,12 +58,13 @@ function httpRequest(url, method, body) {
       headers: { 'Content-Type': 'application/json' },
       timeout: 15000,
     };
+    if (API_KEY) opts.headers['x-api-key'] = API_KEY;
     if (data) opts.headers['Content-Length'] = Buffer.byteLength(data);
 
     const req = mod.request(opts, (res) => {
       let out = '';
       res.on('data', d => out += d);
-      res.on('end', () => resolve(out));
+      res.on('end', () => resolve({ status: res.statusCode, body: out }));
     });
     req.on('error', reject);
     req.on('timeout', () => { req.destroy(); reject(new Error('timeout')); });
@@ -71,16 +73,39 @@ function httpRequest(url, method, body) {
   });
 }
 
-async function pinToIPFS(content) {
-  const raw = await httpRequest(IPFS_UPLOAD, 'POST', { content });
-  const parsed = JSON.parse(raw);
-  if (!parsed.cid) throw new Error(`No CID: ${raw}`);
-  return parsed.cid;
+async function pinToIPFS(content, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const { status, body } = await httpRequest(IPFS_UPLOAD, 'POST', { content });
+      if (status === 429) {
+        const wait = (i + 1) * 2000;
+        await new Promise(r => setTimeout(r, wait));
+        continue;
+      }
+      const parsed = JSON.parse(body);
+      if (!parsed.cid) throw new Error(`No CID: ${body}`);
+      return parsed.cid;
+    } catch(e) {
+      if (i === retries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
 }
 
-async function recallFromIPFS(cid) {
-  const raw = await httpRequest(`${IPFS_RECALL}/${cid}`, 'GET', null);
-  return JSON.parse(raw);
+async function recallFromIPFS(cid, retries = 3) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const { status, body } = await httpRequest(`${IPFS_RECALL}/${cid}`, 'GET', null);
+      if (status === 429) {
+        await new Promise(r => setTimeout(r, (i + 1) * 2000));
+        continue;
+      }
+      return JSON.parse(body);
+    } catch(e) {
+      if (i === retries - 1) throw e;
+      await new Promise(r => setTimeout(r, 1000 * (i + 1)));
+    }
+  }
 }
 
 // Run one agent for one round — fully independent
@@ -102,7 +127,7 @@ async function runAgent(agent, round, agentState, stats) {
     stats.pins++;
 
     // Step 2: Write decision on-chain
-    const sdk = new AgentClient({ rpcUrl: RPC_URL, wallet: agent.kp });
+    const sdk = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: agent.kp });
     const result = await sdk.decisionWrite(
       agent.kp,
       `chaos-r${round}`,

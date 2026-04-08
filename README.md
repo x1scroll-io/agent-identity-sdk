@@ -2,6 +2,7 @@
 
 **The standard for persistent agent identity and on-chain memory on X1 blockchain.**
 
+[![A2A Protocol](https://github.com/x1scroll-io/agent-identity-sdk/actions/workflows/a2a-sim.yml/badge.svg)](https://github.com/x1scroll-io/agent-identity-sdk/actions/workflows/a2a-sim.yml)
 [![npm version](https://img.shields.io/npm/v/@x1scroll/agent-sdk?color=blue&label=npm)](https://www.npmjs.com/package/@x1scroll/agent-sdk)
 [![License: BSL-1.1](https://img.shields.io/badge/License-BSL--1.1-orange.svg)](./LICENSE)
 [![X1 Mainnet](https://img.shields.io/badge/X1-Mainnet-green.svg)](https://explorer.x1.xyz)

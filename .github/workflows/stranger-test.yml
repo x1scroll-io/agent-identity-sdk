@@ -1,0 +1,121 @@
+name: Stranger Test — Cold Start CI
+
+on:
+  schedule:
+    - cron: '0 8 * * *'   # 8am UTC daily (3am Detroit)
+  push:
+    branches: [main]
+  workflow_dispatch:        # manual trigger anytime
+
+jobs:
+  stranger-test:
+    name: Cold Start Chaos Mode
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout (cold clone)
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.solana.com/stable/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Install dependencies
+        run: npm install
+
+      - name: Generate fresh wallet
+        run: |
+          node -e "
+          const { Keypair } = require('@solana/web3.js');
+          const fs = require('fs');
+          const kp = Keypair.generate();
+          fs.writeFileSync('./wallet.json', JSON.stringify(Array.from(kp.secretKey)));
+          console.log('Stranger wallet:', kp.publicKey.toBase58());
+          "
+
+      - name: Fund stranger wallet
+        env:
+          FUNDER_SECRET: ${{ secrets.FUNDER_SECRET_B58 }}
+          RPC_URL: ${{ secrets.RPC_URL }}
+          RPC_API_KEY: ${{ secrets.RPC_API_KEY }}
+        run: |
+          node -e "
+          const { Connection, Keypair, Transaction, SystemProgram, PublicKey, LAMPORTS_PER_SOL } = require('@solana/web3.js');
+          const bs58 = require('bs58');
+          const fs = require('fs');
+
+          const funder = Keypair.fromSecretKey(bs58.decode(process.env.FUNDER_SECRET));
+          const stranger = JSON.parse(fs.readFileSync('./wallet.json'));
+          const strangerPub = Keypair.fromSecretKey(Uint8Array.from(stranger)).publicKey;
+
+          const conn = new Connection(process.env.RPC_URL, {
+            commitment: 'confirmed',
+            httpHeaders: { 'x-api-key': process.env.RPC_API_KEY }
+          });
+
+          (async () => {
+            const tx = new Transaction().add(SystemProgram.transfer({
+              fromPubkey: funder.publicKey,
+              toPubkey: strangerPub,
+              lamports: 3 * LAMPORTS_PER_SOL
+            }));
+            const sig = await conn.sendTransaction(tx, [funder]);
+            await conn.confirmTransaction(sig);
+            console.log('Funded 3 XNT to', strangerPub.toBase58(), '| TX:', sig);
+          })().catch(e => { console.error('Fund failed:', e.message); process.exit(1); });
+          "
+
+      - name: Run stranger registration (5 agents)
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+          RPC_API_KEY: ${{ secrets.RPC_API_KEY }}
+        run: |
+          NUM_AGENTS=5 \
+          NUM_ROUNDS=1 \
+          HUMAN_WALLET=./wallet.json \
+          STATE_FILE=./sim_state.json \
+          LOG_FILE=./sim.log \
+          node sim/citizens-city-stress.mjs
+
+      - name: Run chaos mode (5 agents × 3 rounds)
+        env:
+          RPC_URL: ${{ secrets.RPC_URL }}
+          RPC_API_KEY: ${{ secrets.RPC_API_KEY }}
+        run: |
+          NUM_AGENTS=5 \
+          NUM_ROUNDS=3 \
+          HUMAN_WALLET=./wallet.json \
+          STATE_FILE=./sim_state.json \
+          LOG_FILE=./chaos.log \
+          node sim/chaos-mode.mjs
+
+      - name: Verify results
+        run: |
+          node -e "
+          const fs = require('fs');
+          const log = fs.readFileSync('./chaos.log', 'utf8');
+          const match = log.match(/Success rate:\s+([\d.]+)%/);
+          const rate = match ? parseFloat(match[1]) : 0;
+          console.log('Success rate:', rate + '%');
+          if (rate < 100) {
+            console.error('FAILED — success rate below 100%');
+            process.exit(1);
+          }
+          console.log('✅ PASSED — chaos mode 100% success');
+          "
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: failure-logs
+          path: |
+            sim.log
+            chaos.log

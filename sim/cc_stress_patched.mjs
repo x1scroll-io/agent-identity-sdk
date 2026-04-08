@@ -27,7 +27,7 @@ const CONFIG = {
   numAgents:     parseInt(process.env.NUM_AGENTS  || '10'),    // scale up: 10 → 100 → 1000
   decisionsEach: 10,       // decisions per agent per round
   roundIntervalMs: 30000,  // 30s between rounds (production cadence)
-  maxRounds:     Infinity, // runs until Ctrl+C — 24h+ continuous
+  maxRounds: parseInt(process.env.MAX_ROUNDS || 'Infinity'), // runs until Ctrl+C — 24h+ continuous
   batchSize:     5,        // decisions per tx (5x compression)
   logFile:       process.env.LOG_FILE   || './citizens_city_sim.log',
   stateFile:     process.env.STATE_FILE || './citizens_city_sim_state.json',
@@ -153,9 +153,9 @@ async function main() {
         await client._sendAndConfirm(fundTx, [humanKeypair]);
         log(`  Funded agent ${agentId}: ${agentKp.publicKey.toBase58().slice(0, 12)}... (0.2 XNT)`);
 
-        // Register agent — each agent registers as its OWN authority (unique PDA per agent)
-        const agentRegClient = new AgentClient({ rpcUrl: CONFIG.rpcUrl, wallet: agentKp });
-        const { txSig, agentRecordPDA } = await agentRegClient.register(
+        // Register agent — agentId is now part of PDA seeds
+        const { txSig, agentRecordPDA } = await client.register(
+          humanKeypair,
           agentKp,
           agentId,
           'QmSimStart000000000000000000000000000000000000',
@@ -259,7 +259,7 @@ async function main() {
           log(`  [${shortId}] ${agentDecisions} decisions → ${agentTxns} txns (${(agentDecisions/agentTxns).toFixed(1)}x batch)`);
         }
       } catch (err) {
-        log(`  ❌ [${shortId}] ${err.message.slice(0, 300)}`);
+        log(`  ❌ [${shortId}] ${err.message.slice(0, 100)}`);
         state.errors++;
       }
 

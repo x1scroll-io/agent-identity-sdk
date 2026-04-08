@@ -261,7 +261,7 @@ class AgentClient {
    * @param {string} [opts.rpcUrl]
    *   X1 RPC endpoint (default: https://x1scroll.io/rpc).
    */
-  constructor({ wallet = null, keypair = null, rpcUrl = DEFAULT_RPC_URL } = {}) {
+  constructor({ wallet = null, keypair = null, rpcUrl = DEFAULT_RPC_URL, apiKey = null } = {}) {
     const resolvedWallet = wallet || keypair;
     if (resolvedWallet === null || resolvedWallet === undefined) {
       this.keypair       = null;
@@ -284,6 +284,7 @@ class AgentClient {
     }
 
     this.rpcUrl            = rpcUrl;
+    this.apiKey            = apiKey || process.env.RPC_API_KEY || null;
     this._connection       = null;
     this._registryCache    = null;
     this._registryCacheExpiry = 0;
@@ -346,7 +347,10 @@ class AgentClient {
   /** @returns {Connection} */
   _getConnection() {
     if (!this._connection) {
-      this._connection = new Connection(this.rpcUrl, 'confirmed');
+      const connConfig = this.apiKey
+        ? { commitment: 'confirmed', httpHeaders: { 'x-api-key': this.apiKey } }
+        : 'confirmed';
+      this._connection = new Connection(this.rpcUrl, connConfig);
     }
     return this._connection;
   }
@@ -702,10 +706,17 @@ class AgentClient {
     confidenceBuf.writeUInt32LE(confidence, 0);
 
     // Instruction data: discriminator + branch_label + cid + decision_hash + parent_hash + outcome + confidence
+    // NOTE: branch_label=[u8;32] and cid=[u8;64] fixed arrays — no length prefix, null-padded
+    // Fixed arrays avoid BPF heap alloc (OOM fix). Sizes must match on-chain DecisionRecord struct.
+    const encodeFixedN = (s, n) => {
+      const buf = Buffer.alloc(n, 0);
+      Buffer.from(s, 'utf8').copy(buf, 0, 0, n);
+      return buf;
+    };
     const data = Buffer.concat([
       DISCRIMINATORS.decision_write,
-      encodeString(branchLabel),     // branch_label: String
-      encodeString(cid),             // cid: String
+      encodeFixedN(branchLabel, 32), // branch_label: [u8;32] fixed — null-padded
+      encodeFixedN(cid, 64),         // cid: [u8;64] fixed — null-padded
       decisionHash,                  // decision_hash: [u8;32]
       parentHashBuf,                 // parent_hash: [u8;32]
       Buffer.from([outcome]),        // outcome: u8

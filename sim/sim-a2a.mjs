@@ -33,7 +33,7 @@ const https  = require('https');
 const crypto = require('crypto');
 
 // ── Config ────────────────────────────────────────────────────────────────────
-const RPC_URL     = process.env.RPC_URL     || 'http://104.250.159.138:8899';
+const RPC_URL     = process.env.RPC_URL     || 'https://rpc.mainnet.x1.xyz';
 const IPFS_UPLOAD = 'https://x1scroll.io/api/ipfs/upload';
 const IPFS_FETCH  = 'https://x1scroll.io/api/ipfs';
 const LOG_FILE    = process.env.LOG_FILE    || './sim-a2a.log';
@@ -121,7 +121,9 @@ async function fundWallet(conn, fromKp, toPubkey, lamports) {
   tx.feePayer = fromKp.publicKey;
   tx.sign(fromKp);
   const sig = await conn.sendRawTransaction(tx.serialize(), { skipPreflight: false });
-  await conn.confirmTransaction(sig, 'confirmed');
+  // Poll for confirmation — avoids WebSocket (fails on proxied RPCs)
+  const { blockhash: bh2, lastValidBlockHeight } = await conn.getLatestBlockhash();
+  await conn.confirmTransaction({ signature: sig, blockhash: bh2, lastValidBlockHeight }, 'confirmed');
   return sig;
 }
 

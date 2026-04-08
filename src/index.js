@@ -5,7 +5,7 @@
  * Human-Agent Protocol v2 — human wallet IS the agent identity.
  * One agent per human wallet. Human controls everything.
  *
- * Program ID:  5GpUJ9QH2N5wgnSWYG3CRoRdF85RfQiDFmB35HApqGM6
+ * Program ID:  AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa
  * Treasury:    A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK
  * Network:     X1 Mainnet
  * License:     BSL-1.1 — https://x1scroll.io/license
@@ -47,7 +47,7 @@ const FALLBACK_VALIDATORS = [
  * Human IS the agent identity. Cost-efficient, human-controlled.
  * Deployed 2026-04-07, slot 41701769.
  */
-const PROGRAM_ID = new PublicKey('5GpUJ9QH2N5wgnSWYG3CRoRdF85RfQiDFmB35HApqGM6');
+const PROGRAM_ID = new PublicKey('AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa');
 
 /**
  * Fee collector wallet. Built into every instruction on-chain.

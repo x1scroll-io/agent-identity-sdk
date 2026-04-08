@@ -61,7 +61,8 @@ async function bootstrapAgents(n) {
 
   const { Transaction, SystemProgram } = require('@solana/web3.js');
   const humanClient = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: humanKp });
-  const conn = new Connection(RPC_URL, 'confirmed');
+  const connConfig = API_KEY ? { commitment: 'confirmed', httpHeaders: { 'x-api-key': API_KEY } } : 'confirmed';
+  const conn = new Connection(RPC_URL, connConfig);
   const bal = await conn.getBalance(humanKp.publicKey);
   log(`  Wallet balance: ${(bal / 1e9).toFixed(4)} XNT`);
 
@@ -80,7 +81,7 @@ async function bootstrapAgents(n) {
       const genesisCid  = await pinToIPFS({ agentId, event: 'genesis', ts: new Date().toISOString() });
       const manifestCid = await pinToIPFS({ agentId, event: 'manifest', version: '1.0', ts: new Date().toISOString() });
 
-      const agentRegClient = new AgentClient({ rpcUrl: RPC_URL, wallet: agentKp });
+      const agentRegClient = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: agentKp });
       await agentRegClient.register(agentKp, agentId, genesisCid, manifestCid.slice(0, 64));
 
       agentKeys.push(agentKp.secretKey.toString() + '|' + agentId);
@@ -179,7 +180,8 @@ async function main() {
   const agents = loadAgentKeypairs(NUM_AGENTS);
   log(`Loaded ${agents.length} agent keypairs from state`);
 
-  const connection = new Connection(RPC_URL, 'confirmed');
+  const rpcConfig = API_KEY ? { commitment: 'confirmed', httpHeaders: { 'x-api-key': API_KEY } } : 'confirmed';
+  const connection = new Connection(RPC_URL, rpcConfig);
 
   // Track per-agent state: last CID pinned, last decision hash (for chaining)
   const agentState = agents.map(a => ({ ...a, lastCid: null, lastHash: null, decisions: 0, errors: 0 }));
@@ -220,7 +222,7 @@ async function main() {
         }
 
         // Step 3: Write decision on-chain with real CID + parent hash chain
-        const sdk = new AgentClient({ rpcUrl: RPC_URL, wallet: agent.kp });
+        const sdk = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: agent.kp });
         try {
           const result = await sdk.decisionWrite(
             agent.kp,

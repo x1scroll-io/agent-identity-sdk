@@ -69,7 +69,8 @@ async function bootstrapAgents(n) {
 
   const { Transaction, SystemProgram } = require('@solana/web3.js');
   const humanClient = new AgentClient({ rpcUrl: RPC_URL, apiKey: API_KEY, wallet: humanKp });
-  const conn = new Connection(RPC_URL, 'confirmed');
+  const connConfig = API_KEY ? { commitment: 'confirmed', httpHeaders: { 'x-api-key': API_KEY } } : 'confirmed';
+  const conn = new Connection(RPC_URL, connConfig);
   const bal = await conn.getBalance(humanKp.publicKey);
   log(`  Wallet balance: ${(bal / 1e9).toFixed(4)} XNT`);
 

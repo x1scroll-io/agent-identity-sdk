@@ -142,6 +142,7 @@ function pinToIPFS(content, retries = 3) {
     req.write(body);
     req.end();
   });
+  return attempt(0);
 }
 
 // ── Recall from IPFS (with retry on 429) ─────────────────────────────────────

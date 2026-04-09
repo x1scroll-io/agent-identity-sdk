@@ -811,7 +811,13 @@ class AgentClient {
       throw new AgentSDKError('limit must be a positive integer', 'INVALID_INPUT');
     }
 
-    const agent       = await this.getAgent(humanPubkey);
+    let agent;
+    try {
+      agent = await this.getAgent(humanPubkey);
+    } catch (err) {
+      if (err.code === 'NOT_FOUND') return []; // unregistered wallet — no memories yet
+      throw err;
+    }
     const memoryCount = agent.memoryCount || 0;
 
     if (memoryCount === 0) return [];
@@ -1193,4 +1199,12 @@ module.exports = {
   TREASURY,
   DEFAULT_RPC_URL,
   DEFAULT_PIN_FEE_LAMPORTS,
+  // Re-export @solana/web3.js primitives so developers need only one import
+  Keypair,
+  Connection,
+  PublicKey,
+  Transaction,
+  TransactionInstruction,
+  SystemProgram,
+  LAMPORTS_PER_SOL,
 };

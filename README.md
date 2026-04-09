@@ -39,9 +39,15 @@ const agent = Keypair.generate();          // the agent's keypair
 
 const client = new AgentClient({ wallet: human, rpcUrl: 'https://rpc.x1.xyz' });
 
-const { txSig, agentRecordPDA } = await client.register(agent, 'my-agent', 'ipfs://Qm...');
-const { txSig: memTx }          = await client.storeMemory(agent, human.publicKey.toBase58(), 'session-1', 'bafyQm...', ['daily']);
-const memories                  = await client.listMemories(agent.publicKey, 5);
+// register(humanKeypair, agentId, memoryCid, manifestCid)
+const { txSig, agentRecordPDA } = await client.register(
+  human,
+  'my-agent',
+  'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi',  // memoryCid (IPFS CID, max 64 chars)
+  'bafkreihdwdcefgh4dqkjv67uzcmw7ojee6xedzdetojuzjevtenxquvyku'   // manifestCid (IPFS CID, max 64 chars)
+);
+const { txSig: memTx } = await client.storeMemory(agent, human.publicKey.toBase58(), 'session-1', 'bafybeigdyrzt5sfp7udm7hu76uh7y26nf3efuylqabf3oclgtqy55fbzdi', ['daily']);
+const memories         = await client.listMemories(agent.publicKey, 5);
 ```
 
 ---

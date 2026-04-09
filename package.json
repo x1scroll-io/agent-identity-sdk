@@ -1,6 +1,6 @@
 {
   "name": "@x1scroll/agent-sdk",
-  "version": "2.0.0",
+  "version": "2.0.1",
   "description": "Agent identity and on-chain memory protocol for X1 blockchain",
   "license": "BSL-1.1",
   "main": "src/index.js",
@@ -29,7 +29,7 @@
   "homepage": "https://x1scroll.io",
   "repository": {
     "type": "git",
-    "url": "https://github.com/x1scroll/agent-identity-sdk.git"
+    "url": "https://github.com/x1scroll-io/agent-identity-sdk.git"
   },
   "bugs": {
     "url": "https://github.com/x1scroll/agent-identity-sdk/issues"

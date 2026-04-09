@@ -9,6 +9,46 @@
 
 ---
 
+## Which SDK Do I Need?
+
+| I want to... | Use |
+|---|---|
+| Give my users a persistent AI companion that remembers them | **This SDK** — `@x1scroll/agent-sdk` |
+| Build autonomous agents that coordinate with each other on-chain | **This SDK** — `@x1scroll/agent-sdk` |
+| Both | **This SDK** — same protocol, same chain |
+
+One SDK. Two use cases. One agent per human wallet for companions, or multi-agent coordination for hive mind builds. The protocol handles both.
+
+---
+
+## Why On-Chain Memory vs a Database?
+
+A database is a liability. You maintain it, back it up, pay for it, and lose it if you stop. Your users' data is hostage to your infrastructure.
+
+On-chain memory is owned by the user's wallet. It lives on X1 permanently. If you shut down tomorrow, the memories survive. Any app that knows the user's wallet address can read them. That's the difference between a product and a protocol.
+
+**Practical benefits:**
+- Zero database infrastructure — no Postgres, no Redis, no backups
+- User owns their data — you can't lose or delete it accidentally
+- Any model can read it — swap Claude for GPT-4o tomorrow, memories stay
+- Verifiable — every memory write is a signed on-chain transaction, provably authentic
+- Costs nearly nothing — 0.001 XNT per memory (~$0.0001 at current prices)
+
+---
+
+## Cost Breakdown
+
+| Action | Cost | Who Pays |
+|---|---|---|
+| Register agent | 0.05 XNT | Human wallet (one-time) |
+| Store memory | 0.001 XNT | Agent wallet (per write) |
+| Read memories | Free | — |
+| Pin to IPFS | Free | x1scroll.io covers it |
+
+At $0.10/XNT that's $0.005 to register and $0.0001 per memory. Running an agent that writes 100 memories per day costs less than $0.01/day.
+
+---
+
 ## Why Use This?
 
 - **Your agent's memory lives on X1** — permanent, verifiable, owned by your wallet. No database to maintain. No vendor lock-in.
@@ -26,6 +66,8 @@ npm install @x1scroll/agent-sdk
 ```
 
 **Requirements:** Node.js 18+ | X1 wallet funded with XNT
+
+> **New to XNT?** Get a wallet at [x1scroll.io](https://x1scroll.io) and fund it from [xDEX](https://app.xdex.xyz). You need 0.1 XNT to get started — less than $0.01.
 
 ---
 
@@ -450,13 +492,33 @@ The active validator list is cached in memory for **5 minutes** to avoid hammeri
 
 ---
 
+## Verify Your Agent On-Chain
+
+After registering, verify your agent is live on the X1 explorer:
+
+```
+https://explorer.x1.xyz/address/<agentRecordPDA>
+```
+
+Or check programmatically:
+
+```js
+const agent = await client.getAgent(human.publicKey);
+console.log('Agent name:', agent.name);
+console.log('Memory count:', agent.memoryCount);
+console.log('PDA:', agent.pda);
+```
+
+---
+
 ## Protocol Info
 
 | Field | Value |
 |-------|-------|
-| Program ID | `52EW3sn2Tkq6EMnp86JWUzXrNzrFujpdEgovsjwapbAM` |
-| Treasury | `HYP2VdVk2QNGKMBfWGFZpaFqMoqQkB7Vp5F12eSxCxtf` |
+| Program ID | `AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa` |
+| Treasury | `A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK` |
 | Network | X1 Mainnet |
+| RPC | `https://x1scroll.io/rpc` (archival) |
 | Explorer | [explorer.x1.xyz](https://explorer.x1.xyz) |
 | License | BSL-1.1 (free to use, no commercial forks) |
 | Change Date | 2028-01-01 → Apache-2.0 |

@@ -2,7 +2,7 @@
  * SIM-A2A — Agent-to-Agent Outside-In Test
  * 
  * Uses @x1scroll/agent-identity-sdk (local, publishing as v2.0.0)
- * Program: AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa
+ * Program: ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB
  *          Human-Agent Protocol v2 — human wallet IS the agent identity
  * 
  * Tests the full A2A primitive:
@@ -130,7 +130,7 @@ async function fundWallet(conn, fromKp, toPubkey, lamports) {
 // ── Main ──────────────────────────────────────────────────────────────────────
 log('\n━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━');
 log(' SIM-A2A — Agent-to-Agent Outside-In Test');
-log(' Program: AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa');
+log(' Program: ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB');
 log(' SDK: @x1scroll/agent-sdk v2.0.0 (local src)');
 log('━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━\n');
 
@@ -357,7 +357,7 @@ try {
 // ── Save state ────────────────────────────────────────────────────────────────
 const state = {
   timestamp: new Date().toISOString(),
-  program: 'AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa',
+  program: 'ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB',
   alpha: {
     wallet: alphaHumanKp.publicKey.toBase58(),
     pda: alphaPDA,

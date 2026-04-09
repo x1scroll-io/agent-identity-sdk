@@ -305,9 +305,13 @@ Fetch multiple memories, most recent first. Uses batch RPC for efficiency.
 
 ---
 
-### `AgentClient.deriveAgentRecord(agentPubkey, programId?)`
+### `AgentClient.deriveAgentRecord(humanPubkey, agentName, programId?)`
 
 Static helper — derive the AgentRecord PDA without constructing a client.
+
+**Seeds:** `["agent", humanPubkey_bytes, agentName_utf8_bytes]`
+
+> ⚠️ The `agentName` parameter is required and must match the name used at registration exactly — it is part of the PDA seed. This was confirmed via on-chain reverse-engineering by Cyberdyne (Theo) on 2026-04-09.
 
 **Returns:** `{ pda: PublicKey, bump: number }`
 
@@ -441,6 +445,60 @@ ipfs pin add <CID>
 
 ---
 
+## Storage Router (Decentralized IPFS)
+
+By default, memory pins go to x1scroll.io. Enable decentralized storage across all validator nodes:
+
+```js
+const { createStorageRouter, setStorageRouter } = require('@x1scroll/agent-sdk');
+
+// On app startup — enable distributed storage
+const storage = await createStorageRouter();
+setStorageRouter(storage);
+
+// Now all uploadMemory() calls automatically route across validator nodes
+```
+
+Validators that run the x1scroll proxy and enable IPFS storage earn fees on every pin and recall they serve.
+
+### Direct StorageRouter Usage
+
+```js
+const { createStorageRouter } = require('@x1scroll/agent-sdk');
+
+const storage = await createStorageRouter();
+
+// Pin content — round-robins across storage nodes
+const { cid, endpoint } = await storage.pin('my content here');
+console.log('Pinned to:', endpoint, '| CID:', cid);
+
+// Fetch by CID — tries all nodes until one succeeds
+const content = await storage.fetch(cid);
+
+// See active nodes
+console.log('Storage nodes:', storage.getNodes());
+
+// Clean up background refresh timer when done
+storage.destroy();
+```
+
+### StorageRouter API
+
+| Method | Description |
+|--------|-------------|
+| `await createStorageRouter(registryUrl?)` | Create and initialize a router (fetches storage node list) |
+| `setStorageRouter(router)` | Set module-level singleton — wires into `uploadMemory()` globally |
+| `await storage.pin(content)` | Pin string or Buffer; returns `{ cid, endpoint }` |
+| `await storage.fetch(cid)` | Fetch CID content as string; tries all nodes |
+| `storage.getNodes()` | Returns current list of storage node base URLs |
+| `storage.destroy()` | Stop background refresh timer |
+
+**Node discovery:** The router fetches `/api/registry/nodes?type=storage` every 5 minutes. Falls back to `https://x1scroll.io/api/ipfs` if no storage nodes are registered.
+
+**Failure handling:** If a node fails a pin, it's skipped for 60 seconds and the next node is tried. If all nodes fail, an error is thrown with `"All storage nodes unavailable"`.
+
+---
+
 ## Fee Structure
 
 | Action | XNT Cost | Why |
@@ -515,7 +573,7 @@ console.log('PDA:', agent.pda);
 
 | Field | Value |
 |-------|-------|
-| Program ID | `AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa` |
+| Program ID | `ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB` |
 | Treasury | `A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK` |
 | Network | X1 Mainnet |
 | RPC | `https://x1scroll.io/rpc` (archival) |

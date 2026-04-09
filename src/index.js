@@ -5,7 +5,7 @@
  * Human-Agent Protocol v2 — human wallet IS the agent identity.
  * One agent per human wallet. Human controls everything.
  *
- * Program ID:  AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa
+ * Program ID:  ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB
  * Treasury:    A1TRS3i2g62Zf6K4vybsW4JLx8wifqSoThyTQqXNaLDK
  * Network:     X1 Mainnet
  * License:     BSL-1.1 — https://x1scroll.io/license
@@ -47,7 +47,7 @@ const FALLBACK_VALIDATORS = [
  * Human IS the agent identity. Cost-efficient, human-controlled.
  * Deployed 2026-04-07, slot 41701769.
  */
-const PROGRAM_ID = new PublicKey('AKrx1X75v7MrFcVTnjxoA7VFvDh8ZZmaEw7SDehweCXa');
+const PROGRAM_ID = new PublicKey('ECgaMEwH4KLSz3awDo1vz84mSrx5n6h1ZCrbmunB5UxB');
 
 /**
  * Fee collector wallet. Built into every instruction on-chain.
@@ -415,11 +415,12 @@ class AgentClient {
    * @param {PublicKey|string} [programId]
    * @returns {{ pda: PublicKey, bump: number }}
    */
-  static deriveAgentRecord(humanPubkey, programId = PROGRAM_ID) {
+  static deriveAgentRecord(humanPubkey, agentName, programId = PROGRAM_ID) {
     const humanKey = new PublicKey(humanPubkey);
     const progKey  = new PublicKey(programId);
+    if (!agentName) throw new Error('agentName is required for PDA derivation. Seeds: [b"agent", wallet, name]');
     const [pda, bump] = PublicKey.findProgramAddressSync(
-      [Buffer.from('agent'), humanKey.toBuffer()],
+      [Buffer.from('agent'), humanKey.toBuffer(), Buffer.from(agentName, 'utf8')],
       progKey
     );
     return { pda, bump };
@@ -1189,6 +1190,63 @@ function getAgentPda(humanPublicKey) {
   return { pda, bump };
 }
 
+const { RpcRouter, createRpcRouter } = require('./rpc');
+const { StorageRouter, createStorageRouter } = require('./storage');
+
+// ── Module-level StorageRouter singleton ──────────────────────────────────────
+// Set this on app startup to distribute IPFS pins across all validator nodes.
+// If not set, uploadMemory() falls back to the hardcoded x1scroll.io endpoint.
+//
+//   const storage = await createStorageRouter();
+//   setStorageRouter(storage);
+//
+let _storageRouter = null;
+
+/**
+ * Set the module-level StorageRouter used by uploadMemory().
+ * Call once at app startup after await createStorageRouter().
+ *
+ * @param {StorageRouter|null} router
+ */
+function setStorageRouter(router) {
+  _storageRouter = router;
+}
+
+/**
+ * Internal helper: pin content to IPFS via StorageRouter (if set) or
+ * the hardcoded x1scroll.io endpoint (backward-compatible fallback).
+ *
+ * @param {string|Buffer} content
+ * @returns {Promise<{ cid: string, endpoint: string }>}
+ */
+async function _pinToIPFS(content) {
+  if (_storageRouter) {
+    return _storageRouter.pin(content);
+  }
+
+  // Legacy fallback — direct POST to x1scroll.io (original behavior)
+  const endpoint  = 'https://x1scroll.io/api/ipfs/upload';
+  const body      = Buffer.isBuffer(content) ? content : Buffer.from(content, 'utf8');
+
+  const fetchFn = typeof globalThis.fetch === 'function'
+    ? globalThis.fetch
+    : (() => { throw new Error('fetch not available — Node 18+ required for direct IPFS upload'); });
+
+  const res = await fetchFn(endpoint, {
+    method:  'POST',
+    headers: { 'Content-Type': 'application/octet-stream' },
+    body,
+    signal:  AbortSignal.timeout(15_000),
+  });
+
+  if (!res.ok) throw new AgentSDKError(`IPFS upload failed: HTTP ${res.status}`, 'PIN_FAILED');
+
+  const json = await res.json();
+  if (!json || !json.cid) throw new AgentSDKError('IPFS upload returned no CID', 'PIN_FAILED');
+
+  return { cid: json.cid, endpoint };
+}
+
 module.exports = {
   AgentClient,
   PinningRegistryClient,
@@ -1199,6 +1257,15 @@ module.exports = {
   TREASURY,
   DEFAULT_RPC_URL,
   DEFAULT_PIN_FEE_LAMPORTS,
+  // Round-robin RPC router
+  RpcRouter,
+  createRpcRouter,
+  // Decentralized IPFS storage router
+  StorageRouter,
+  createStorageRouter,
+  setStorageRouter,
+  // Internal — exported for testing
+  _pinToIPFS,
   // Re-export @solana/web3.js primitives so developers need only one import
   Keypair,
   Connection,

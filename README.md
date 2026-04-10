@@ -32,7 +32,7 @@ On-chain memory is owned by the user's wallet. It lives on X1 permanently. If yo
 - User owns their data — you can't lose or delete it accidentally
 - Any model can read it — swap Claude for GPT-4o tomorrow, memories stay
 - Verifiable — every memory write is a signed on-chain transaction, provably authentic
-- Costs nearly nothing — 0.001 XNT per memory (~$0.0001 at current prices)
+- Costs nearly nothing — 0.001 XNT per memory (~$0.00035 at current prices)
 
 ---
 
@@ -45,7 +45,7 @@ On-chain memory is owned by the user's wallet. It lives on X1 permanently. If yo
 | Read memories | Free | — |
 | Pin to IPFS | Free | x1scroll.io covers it |
 
-At $0.10/XNT that's $0.005 to register and $0.0001 per memory. Running an agent that writes 100 memories per day costs less than $0.01/day.
+At ~$0.35/XNT that's ~$0.018 to register and ~$0.00035 per memory. Running an agent that writes 100 memories per day costs less than $0.04/day.
 
 ---
 
@@ -67,7 +67,7 @@ npm install @x1scroll/agent-sdk
 
 **Requirements:** Node.js 18+ | X1 wallet funded with XNT
 
-> **New to XNT?** Get a wallet at [x1scroll.io](https://x1scroll.io) and fund it from [xDEX](https://app.xdex.xyz). You need 0.1 XNT to get started — less than $0.01.
+> **New to XNT?** Get a wallet at [x1scroll.io](https://x1scroll.io) and fund it from [xDEX](https://app.xdex.xyz). You need 0.1 XNT to get started — about $0.035 at current prices.
 
 ---
 

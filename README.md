@@ -43,9 +43,10 @@ On-chain memory is owned by the user's wallet. It lives on X1 permanently. If yo
 | Register agent | 0.05 XNT | Human wallet (one-time) |
 | Store memory | 0.001 XNT | Agent wallet (per write) |
 | Read memories | Free | — |
-| Pin to IPFS | Free | x1scroll.io covers it |
+| Pin to IPFS | 0.001 XNT | Agent wallet (per pin) |
+| IPFS recall | 0.001 XNT | Agent wallet (per recall) |
 
-At ~$0.35/XNT that's ~$0.018 to register and ~$0.00035 per memory. Running an agent that writes 100 memories per day costs less than $0.04/day.
+At ~$0.35/XNT that's ~$0.018 to register and ~$0.00035 per memory write or IPFS pin. Running an agent that writes 100 memories/day and pins 100 files/day costs less than $0.08/day.
 
 ---
 

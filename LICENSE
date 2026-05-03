@@ -1,0 +1,83 @@
+# x1scroll Proprietary Software License
+
+Copyright (c) 2026 x1scroll.io. All rights reserved.
+
+---
+
+## 1. Definitions
+
+- **"Software"** means the source code, binaries, documentation, and all associated files in this repository.
+- **"Licensor"** means x1scroll.io and its owner(s).
+- **"You"** means the individual or entity accessing this Software.
+- **"Competing Service"** means any product, service, protocol, or platform that provides archival RPC access, on-chain data storage, agent protocol infrastructure, or permissioned data vaulting on any blockchain network.
+
+---
+
+## 2. Grant of License
+
+Subject to the terms of this License, Licensor grants You a limited, non-exclusive, non-transferable, revocable license to:
+
+- View and read this Software solely for the purpose of integration with x1scroll.io's officially published APIs and SDKs.
+
+---
+
+## 3. Restrictions
+
+You may **NOT**, without prior written permission from Licensor:
+
+- Copy, reproduce, or distribute this Software or any portion of it
+- Modify, adapt, translate, or create derivative works based on this Software
+- Reverse engineer, decompile, disassemble, or attempt to derive the source code or underlying algorithms of this Software
+- Fork, clone for external use, or publish this Software or any derivative
+- Use this Software to build, operate, or contribute to any Competing Service
+- Sublicense, sell, rent, lease, or otherwise transfer rights to this Software
+- Remove or alter any proprietary notices, labels, or marks on this Software
+
+---
+
+## 4. No Open Source Rights
+
+This Software is **not** open source. No rights are granted under any open source license. The presence of this code in any repository does not constitute a grant of open source rights.
+
+---
+
+## 5. Ownership
+
+All right, title, and interest in and to the Software, including all intellectual property rights, remain exclusively with Licensor. This License does not convey any ownership interest to You.
+
+---
+
+## 6. Termination
+
+This License is effective until terminated. It will terminate automatically, without notice, if You fail to comply with any provision. Upon termination, You must immediately cease all use of the Software and destroy all copies in Your possession.
+
+---
+
+## 7. Disclaimer of Warranties
+
+THE SOFTWARE IS PROVIDED "AS IS," WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED. LICENSOR DISCLAIMS ALL WARRANTIES, INCLUDING BUT NOT LIMITED TO WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, AND NON-INFRINGEMENT.
+
+---
+
+## 8. Limitation of Liability
+
+IN NO EVENT SHALL LICENSOR BE LIABLE FOR ANY INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES ARISING OUT OF OR RELATED TO THIS LICENSE OR THE USE OF THE SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGES.
+
+---
+
+## 9. Governing Law
+
+This License shall be governed by and construed in accordance with the laws of the State of Nevada, without regard to its conflict of law provisions. Any disputes arising under this License shall be subject to the exclusive jurisdiction of the state and federal courts located in Nevada.
+
+---
+
+## 10. Contact
+
+For licensing inquiries or permissions beyond the scope of this License:
+
+**x1scroll.io**
+contact@x1scroll.io
+
+---
+
+*Unauthorized use, reproduction, or distribution of this Software constitutes copyright infringement and may subject You to civil and criminal penalties.*
